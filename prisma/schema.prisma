@@ -1,0 +1,105 @@
+// =========================================
+// 1. CONFIG
+// =========================================
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+
+// =========================================
+// 2. USER (Clerk Mirror)
+// =========================================
+model User {
+  // Store Clerk userId directly
+  id        String   @id
+  email     String   @unique
+  firstName String?
+  lastName  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workflows Workflow[]
+
+  @@map("users")
+}
+
+
+// =========================================
+// 3. WORKFLOW
+// =========================================
+model Workflow {
+  id        Int      @id @default(autoincrement())
+  name      String
+
+  // Entire React Flow graph stored here (serialized as String for SQLite)
+  data      String
+
+  // Relation
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  runs      WorkflowRun[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("workflows")
+}
+
+
+// =========================================
+// 4. WORKFLOW RUN (Execution History)
+// =========================================
+model WorkflowRun {
+  id          String   @id @default(uuid())
+
+  workflowId  Int
+  workflow    Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  triggerType String   @default("MANUAL")
+  status      String
+
+  startedAt   DateTime @default(now())
+  finishedAt  DateTime?
+
+  nodeExecutions NodeExecution[]
+
+  @@index([workflowId])
+  @@map("workflow_runs")
+}
+
+
+// =========================================
+// 5. NODE EXECUTION
+// =========================================
+model NodeExecution {
+  id          String   @id @default(uuid())
+
+  runId       String
+  run         WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  nodeId      String
+  nodeType    String
+  nodeLabel   String?
+
+  status      String
+
+  inputData   String?
+  outputData  String?
+
+  error       String?
+
+  startedAt   DateTime @default(now())
+  finishedAt  DateTime?
+  duration    Int?
+
+  @@index([runId])
+  @@map("node_executions")
+}
