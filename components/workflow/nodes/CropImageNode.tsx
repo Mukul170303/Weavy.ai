@@ -6,15 +6,23 @@ import { Crop, Play, Loader2, MoreHorizontal, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CropImageNodeType, ImageNodeData } from "@/lib/types";
 import { useWorkflowStore } from "@/store/workflow-store";
+import { runSelectedNodesAction } from "@/app/actions/workflowActions";
 
 export default function CropImageNode({ id, data, isConnectable, selected }: NodeProps<CropImageNodeType>) {
     const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
     const deleteNode = useWorkflowStore((state) => state.deleteNode);
     const { getNodes, getEdges } = useReactFlow();
 
+    // Check for connections on parameter handles
+    const edges = getEdges();
+    const isXConnected = edges.some(e => e.target === id && e.targetHandle === "x");
+    const isYConnected = edges.some(e => e.target === id && e.targetHandle === "y");
+    const isWidthConnected = edges.some(e => e.target === id && e.targetHandle === "width");
+    const isHeightConnected = edges.some(e => e.target === id && e.targetHandle === "height");
+    const isImageConnected = edges.some(e => e.target === id && e.targetHandle === "image-input");
+
     const [showMenu, setShowMenu] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
-    const [hoveredHandle, setHoveredHandle] = useState<string | null>(null);
 
     // Initial state setup based on defaults
     const x = data.x ?? 0;
@@ -39,79 +47,30 @@ export default function CropImageNode({ id, data, isConnectable, selected }: Nod
     const handleRun = useCallback(async () => {
         try {
             updateNodeData(id, { status: "loading", errorMessage: undefined });
-            const allNodes = getNodes();
-            const allEdges = getEdges();
-            const incomingEdge = allEdges.find((e) => e.target === id && e.targetHandle === "image-input");
 
-            if (!incomingEdge) {
-                throw new Error("No image connected to input");
-            }
-
-            const sourceNode = allNodes.find((n) => n.id === incomingEdge.source);
-            if (!sourceNode || (sourceNode.type !== "imageNode" && sourceNode.type !== "extractFrameNode")) {
-                throw new Error("Connected input is not a valid image source");
-            }
-
-            const imageData = sourceNode.data as (ImageNodeData & { outputUrl?: string });
-            const imageUrl = imageData.file?.url || imageData.image || imageData.outputUrl;
-
-            if (!imageUrl || typeof imageUrl !== "string") {
-                throw new Error("No image data available from connected node");
-            }
-
-            // Call API backend to process via Trigger.dev
-            const response = await fetch('/api/trigger/ffmpeg', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    type: 'crop',
-                    imageUrl,
-                    params: {
-                        x: data.x ?? 0,
-                        y: data.y ?? 0,
-                        width: data.width ?? 100,
-                        height: data.height ?? 100
-                    }
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error("Failed to start processing");
-            }
-
-            const { runId } = await response.json();
-
-            // Start polling... since trigger.dev is async, we poll the run status
-            const pollRunStatus = async (runId: string) => {
-                const maxAttempts = 30; // 1 min max
-                let attempts = 0;
-
-                while (attempts < maxAttempts) {
-                    const statusRes = await fetch(`/api/trigger/status?runId=${runId}`);
-                    const statusData = await statusRes.json();
-
-                    if (statusData.status === "SUCCESS") {
-                        updateNodeData(id, {
-                            status: "success",
-                            outputUrl: statusData.output.url
-                        });
-                        return;
-                    } else if (statusData.status === "FAILED" || statusData.status === "CANCELED") {
-                        throw new Error("Task failed during processing");
-                    }
-
-                    attempts++;
-                    await new Promise(r => setTimeout(r, 2000));
+            let workflowIdInStore = useWorkflowStore.getState().workflowId;
+            if (!workflowIdInStore || isNaN(parseInt(String(workflowIdInStore)))) {
+                console.log("[Node] No valid ID found, auto-saving...");
+                const savedId = await useWorkflowStore.getState().saveWorkflow();
+                if (!savedId) {
+                    throw new Error("Failed to auto-save workflow. Please save manually.");
                 }
-                throw new Error("Task timeout");
-            };
+                workflowIdInStore = savedId;
+            }
 
-            await pollRunStatus(runId);
+            const result = await runSelectedNodesAction(String(workflowIdInStore), [id]);
+
+            if (!result.success) {
+                throw new Error(result.error || "Failed to start processing");
+            }
+
+            console.log(`[CropImageNode] Task triggered via orchestrator: ${result.runId}`);
+
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : "Failed to crop image";
             updateNodeData(id, { status: "error", errorMessage });
         }
-    }, [id, updateNodeData, getNodes, getEdges, data.x, data.y, data.width, data.height]);
+    }, [id, updateNodeData]);
 
     return (
         <div
@@ -120,6 +79,7 @@ export default function CropImageNode({ id, data, isConnectable, selected }: Nod
                 selected ? "border-[#dfff4f] ring-1 ring-[#dfff4f]/50" : "border-white/10 hover:border-white/30",
                 data.status === "error" && "border-red-500 ring-1 ring-red-500/50"
             )}>
+            {/* Glow effect */}
             {data.status === "loading" && (
                 <div className="absolute -inset-[1px] rounded-xl border-2 border-[#dfff4f] shadow-[0_0_30px_rgba(223,255,79,0.3)] animate-pulse pointer-events-none z-50" />
             )}
@@ -149,7 +109,7 @@ export default function CropImageNode({ id, data, isConnectable, selected }: Nod
                                 }}
                                 className="w-full text-left px-3 py-2 text-[10px] text-red-400 hover:bg-red-500/10 hover:text-red-300 flex items-center gap-2 transition-colors font-medium">
                                 <Trash2 size={10} />
-                                Delete Node
+                                Delete
                             </button>
                         </div>
                     )}
@@ -158,34 +118,63 @@ export default function CropImageNode({ id, data, isConnectable, selected }: Nod
 
             <div className="p-4 flex-1 flex flex-col space-y-4">
                 <div className="grid grid-cols-2 gap-3">
-                    <div>
-                        <label className="block text-[10px] text-white/60 mb-1">X (%)</label>
-                        <input type="number" value={x} onChange={(e) => handleChange('x', Number(e.target.value))} className="w-full bg-[#0a0a0a] text-xs text-white rounded-lg border border-white/10 p-2 focus:outline-none focus:border-[#dfff4f]/50 nodrag" />
-                    </div>
-                    <div>
-                        <label className="block text-[10px] text-white/60 mb-1">Y (%)</label>
-                        <input type="number" value={y} onChange={(e) => handleChange('y', Number(e.target.value))} className="w-full bg-[#0a0a0a] text-xs text-white rounded-lg border border-white/10 p-2 focus:outline-none focus:border-[#dfff4f]/50 nodrag" />
-                    </div>
-                    <div>
-                        <label className="block text-[10px] text-white/60 mb-1">Width (%)</label>
-                        <input type="number" value={width} onChange={(e) => handleChange('width', Number(e.target.value))} className="w-full bg-[#0a0a0a] text-xs text-white rounded-lg border border-white/10 p-2 focus:outline-none focus:border-[#dfff4f]/50 nodrag" />
-                    </div>
-                    <div>
-                        <label className="block text-[10px] text-white/60 mb-1">Height (%)</label>
-                        <input type="number" value={height} onChange={(e) => handleChange('height', Number(e.target.value))} className="w-full bg-[#0a0a0a] text-xs text-white rounded-lg border border-white/10 p-2 focus:outline-none focus:border-[#dfff4f]/50 nodrag" />
-                    </div>
+                    {[
+                        { label: 'X (%)', field: 'x', value: x, connected: isXConnected },
+                        { label: 'Y (%)', field: 'y', value: y, connected: isYConnected },
+                        { label: 'Width (%)', field: 'width', value: width, connected: isWidthConnected },
+                        { label: 'Height (%)', field: 'height', value: height, connected: isHeightConnected }
+                    ].map((item) => (
+                        <div key={item.field} className="relative group">
+                            {/* Handle for each parameter */}
+                            <Handle
+                                type="target"
+                                position={Position.Left}
+                                id={item.field}
+                                className="!w-1.5 !h-3 !rounded-[1px] !bg-white/20 !border-none -left-[21px] top-[26px] hover:!bg-[#dfff4f] transition-colors"
+                            />
+
+                            <label className="block text-[10px] text-white/40 mb-1">{item.label}</label>
+                            <div className="relative">
+                                <input
+                                    type="number"
+                                    value={item.connected ? "" : item.value}
+                                    placeholder={item.connected ? "Linked" : "0"}
+                                    disabled={item.connected}
+                                    onChange={(e) => handleChange(item.field as any, Number(e.target.value))}
+                                    className={cn(
+                                        "w-full bg-[#0a0a0a] text-xs text-white rounded border p-2 focus:outline-none transition-all nodrag",
+                                        item.connected
+                                            ? "border-white/5 opacity-50 cursor-not-allowed placeholder:text-[#dfff4f]/50"
+                                            : "border-white/10 focus:border-[#dfff4f]/30"
+                                    )}
+                                />
+                                {item.connected && (
+                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                        <div className="h-[1px] w-full bg-white/5"></div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    ))}
                 </div>
 
+                {!isImageConnected && (
+                    <div className="py-2 px-3 bg-yellow-500/10 border border-yellow-500/20 rounded-md">
+                        <p className="text-[10px] text-yellow-200/70 leading-tight italic">
+                            Connect an image source to begin cropping.
+                        </p>
+                    </div>
+                )}
+
                 {data.status === "error" && (
-                    <div className="flex flex-col items-center justify-center p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-center">
-                        <span className="text-[10px] text-red-400 font-medium">Processing Failed</span>
-                        <span className="text-[9px] text-red-300/60 mt-0.5 line-clamp-2 leading-tight">{data.errorMessage || "Unknown Error"}</span>
+                    <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-center">
+                        <span className="text-[10px] text-red-400 font-medium">Error: {data.errorMessage || "Processing failed"}</span>
                     </div>
                 )}
 
                 {data.outputUrl && data.status !== "error" && (
-                    <div className="relative group">
-                        <img src={data.outputUrl} alt="Cropped" className="w-full h-32 object-contain rounded-lg border border-white/10 bg-black/50" />
+                    <div className="overflow-hidden rounded-lg border border-white/10 bg-black/50">
+                        <img src={data.outputUrl} alt="Preview" className="w-full h-32 object-contain" />
                     </div>
                 )}
             </div>
@@ -193,44 +182,33 @@ export default function CropImageNode({ id, data, isConnectable, selected }: Nod
             <div className="px-4 pb-4">
                 <button
                     onClick={handleRun}
-                    disabled={data.status === "loading"}
+                    disabled={data.status === "loading" || !isImageConnected}
                     className={cn(
-                        "w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-xs font-semibold transition-all",
-                        data.status === "loading" ? "bg-white/5 text-white/30 cursor-not-allowed" : "bg-white/90 text-black hover:bg-white active:scale-95"
+                        "w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-bold transition-all",
+                        (data.status === "loading" || !isImageConnected)
+                            ? "bg-white/5 text-white/20 cursor-not-allowed"
+                            : "bg-[#dfff4f] text-black hover:scale-[1.02] active:scale-[0.98]"
                     )}>
                     {data.status === "loading" ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-                    Run Frame Task
+                    {data.status === "loading" ? "PROCESSING..." : "RUN CROP"}
                 </button>
             </div>
 
-            {/* Input Handle */}
-            <div className="absolute left-0 top-1/2 -translate-y-1/2">
-                <Handle
-                    type="target"
-                    position={Position.Left}
-                    id="image-input"
-                    isConnectable={isConnectable}
-                    onMouseEnter={() => setHoveredHandle("image-input")}
-                    onMouseLeave={() => setHoveredHandle(null)}
-                    className="!w-2.5 !h-2.5 !bg-[#1a1a1a] !border-2 !border-purple-400"
-                />
-                {hoveredHandle === "image-input" && (
-                    <div className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/90 text-purple-400 text-[10px] px-2 py-1 rounded z-50 pointer-events-none whitespace-nowrap">
-                        Image Input
-                    </div>
-                )}
-            </div>
+            <Handle
+                type="target"
+                position={Position.Left}
+                id="image-input"
+                isConnectable={isConnectable}
+                className="!w-2 !h-4 !rounded-sm !bg-purple-500 !border-none -left-1"
+            />
 
-            {/* Output Handle */}
-            <div className="absolute -right-1.5 top-1/2 -translate-y-1/2 z-50">
-                <Handle
-                    type="source"
-                    position={Position.Right}
-                    id="output"
-                    isConnectable={isConnectable}
-                    className="!w-3 !h-3 !bg-[#1a1a1a] !border-2 !border-purple-400 hover:!bg-purple-400 transition-colors"
-                />
-            </div>
+            <Handle
+                type="source"
+                position={Position.Right}
+                id="output"
+                isConnectable={isConnectable}
+                className="!w-2 !h-4 !rounded-sm !bg-purple-500 !border-none -right-1"
+            />
         </div>
     );
 }

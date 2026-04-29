@@ -54,12 +54,11 @@ export async function saveWorkflowAction({ id, name, nodes, edges }: SaveWorkflo
         // our complex Node types, even though they are valid JSON at runtime.
         const workflowData = { nodes, edges };
 
-        if (id) {
+        const numericId = typeof id === "string" ? parseInt(id) : id;
+        
+        if (numericId && !isNaN(numericId as number)) {
             // UPDATE Existing
-            console.log(`Updating Workflow ID: ${id}`);
-
-            const numericId = typeof id === "string" ? parseInt(id) : id;
-            if (!numericId) return { success: false, error: "Invalid Workflow ID" };
+            console.log(`Updating Workflow ID: ${numericId}`);
 
             const workflow = await prisma.workflow.update({
                 where: {
@@ -230,6 +229,7 @@ export async function runWorkflowAction(workflowId: string) {
                 workflowId: numericId,
                 status: "PENDING",
                 triggerType: "MANUAL",
+                executionScope: "FULL",
             },
         });
 
@@ -244,7 +244,43 @@ export async function runWorkflowAction(workflowId: string) {
         return { success: true, runId: run.id };
 
     } catch (error) {
-        console.error("[Action] CRITICAL FAILURE:", error); // This will show the real error
+        console.error("[Action] CRITICAL FAILURE:", error);
         return { success: false, error: "Failed to run workflow. Check server logs." };
+    }
+}
+
+// ------------------------------------------------------------------
+// RUN SELECTED NODES ACTION
+// ------------------------------------------------------------------
+export async function runSelectedNodesAction(workflowId: string, nodeIds: string[]) {
+    console.log(`[Action] Running selected nodes (${nodeIds.length}) for workflow: "${workflowId}"`);
+
+    try {
+        const { userId } = await auth();
+        if (!userId) return { success: false, error: "Unauthorized" };
+
+        const numericId = parseInt(workflowId);
+        if (isNaN(numericId)) return { success: false, error: "Invalid Workflow ID" };
+
+        // 1. Create the PENDING record with SELECTED scope
+        const run = await prisma.workflowRun.create({
+            data: {
+                workflowId: numericId,
+                status: "PENDING",
+                triggerType: "MANUAL",
+                executionScope: "SELECTED",
+                selectedNodeIds: JSON.stringify(nodeIds),
+            },
+        });
+
+        // 2. Trigger the Orchestrator
+        await tasks.trigger("workflow-orchestrator", {
+            runId: run.id,
+        });
+
+        return { success: true, runId: run.id };
+    } catch (error) {
+        console.error("[Action] Run Selected Failure:", error);
+        return { success: false, error: "Failed to start selective run." };
     }
 }

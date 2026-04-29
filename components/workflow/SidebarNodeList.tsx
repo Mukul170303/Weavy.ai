@@ -154,19 +154,6 @@ const SidebarNodeList = ({ isCollapsed }: SidebarNodeListProps) => {
 					</div>
 				</div>
 			</div>
-
-			{/* Bottom Profile/Mock User */}
-			<div className="p-4 border-t border-white/10">
-				<div className={cn("flex items-center gap-3", isCollapsed && "justify-center")}>
-					<div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 shrink-0" />
-					{!isCollapsed && (
-						<div className="overflow-hidden">
-							<p className="text-xs font-bold text-white truncate">Demo User</p>
-							<p className="text-[10px] text-white/40 truncate">Free Plan</p>
-						</div>
-					)}
-				</div>
-			</div>
 		</>
 	);
 };

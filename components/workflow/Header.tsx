@@ -1,17 +1,22 @@
 "use client";
 
-import React, {useState, useCallback} from "react";
-import {Save, Loader2, Share2, FolderOpen, Play} from "lucide-react";
-import {useWorkflowStore} from "@/store/workflow-store";
-import {saveWorkflowAction, runWorkflowAction} from "app/actions/workflowActions";
+import React, { useState, useCallback } from "react";
+import { Save, Loader2, Share2, FolderOpen, Play } from "lucide-react";
+import { useWorkflowStore } from "@/store/workflow-store";
+import { saveWorkflowAction, runWorkflowAction, runSelectedNodesAction } from "@/app/actions/workflowActions";
 import LoadWorkflowModal from "./LoadWorkflowModal";
+import { useRouter } from "next/navigation";
 
 export default function Header() {
-	const {nodes, edges, workflowId, workflowName, setWorkflowId, setWorkflowName} = useWorkflowStore();
+	const router = useRouter();
+	const { nodes, edges, workflowId, workflowName, setWorkflowId, setWorkflowName, exportWorkflow, importWorkflow, loadSample } = useWorkflowStore();
 	const [isSaving, setIsSaving] = useState(false);
-	const [isRunning, setIsRunning] = useState(false); // 👈 Added state for running
+	const [isRunning, setIsRunning] = useState(false);
 	const [isLoadOpen, setIsLoadOpen] = useState(false);
 	const [isEditingName, setIsEditingName] = useState(false);
+
+	const selectedNodes = nodes.filter((n) => n.selected);
+	const needsPolling = nodes.some(node => node.data?.status === 'loading');
 
 	// --- HANDLE SAVE ---
 	const handleSave = async () => {
@@ -31,8 +36,14 @@ export default function Header() {
 			});
 
 			if (res.success && res.id) {
+				const isNew = !workflowId || isNaN(parseInt(String(workflowId)));
 				setWorkflowId(res.id);
-				// Optional: Toast notification here
+
+				// Sync URL if this was a new/demo workflow
+				if (isNew) {
+					router.push(`/workflows/${res.id}`);
+				}
+
 				return res.id;
 			} else if (res.success) {
 				alert("Saved, but no ID returned.");
@@ -68,14 +79,22 @@ export default function Header() {
 		console.log("Running workflow with ID:", currentId);
 
 		try {
-			const res = await runWorkflowAction(currentId);
+			let res;
+			if (selectedNodes.length > 0) {
+				const selectedIds = selectedNodes.map((n) => n.id);
+				res = await runSelectedNodesAction(currentId, selectedIds);
+			} else {
+				res = await runWorkflowAction(currentId);
+			}
+
 			if (res.success) {
 				console.log(`Workflow run started! Run ID: ${res.runId}`);
-			
+
 				if (typeof res.runId === "string") {
 					localStorage.setItem("lastRunId", res.runId);
 				}
-
+				// 🚀 Show feedback: Open history sidebar automatically
+				useWorkflowStore.getState().setHistoryOpen(true);
 			} else {
 				alert("Run Failed: " + res.error);
 			}
@@ -87,34 +106,28 @@ export default function Header() {
 		}
 	};
 
-	// --- HANDLE SHARE ---
+	// --- HANDLE SHARE (EXPORT) ---
 	const handleShare = useCallback(() => {
-		if (nodes.length === 0) {
-			alert("Nothing to share! The canvas is empty.");
-			return;
-		}
+		exportWorkflow();
+	}, [exportWorkflow]);
 
-		const workflowData = {
-			name: workflowName,
-			nodes: nodes,
-			edges: edges,
-			version: "1.0.0",
-			exportedAt: new Date().toISOString(),
+	// --- HANDLE IMPORT ---
+	const handleImport = () => {
+		const input = document.createElement("input");
+		input.type = "file";
+		input.accept = "application/json";
+		input.onchange = (e) => {
+			const file = (e.target as HTMLInputElement).files?.[0];
+			if (!file) return;
+			const reader = new FileReader();
+			reader.onload = (e) => {
+				const json = e.target?.result as string;
+				importWorkflow(json);
+			};
+			reader.readAsText(file);
 		};
-
-		const jsonString = JSON.stringify(workflowData, null, 2);
-		const blob = new Blob([jsonString], {type: "application/json"});
-		const url = URL.createObjectURL(blob);
-		const link = document.createElement("a");
-		link.href = url;
-		const filename = workflowName.replace(/[^a-z0-9]/gi, "_").toLowerCase() || "workflow";
-		link.download = `${filename}.json`;
-
-		document.body.appendChild(link);
-		link.click();
-		document.body.removeChild(link);
-		URL.revokeObjectURL(url);
-	}, [nodes, edges, workflowName]);
+		input.click();
+	};
 
 	return (
 		<>
@@ -159,12 +172,37 @@ export default function Header() {
 						OPEN
 					</button>
 
-					{/* Share Button */}
+					{/* Load Sample */}
+					<button
+						onClick={loadSample}
+						className="flex items-center gap-2 px-3 py-2 bg-[#222] border border-white/10 text-[#dfff4f] text-xs font-bold rounded-lg hover:bg-[#dfff4f]/10 transition-all">
+						SAMPLE
+					</button>
+
+					{/* Clear Button */}
+					<button
+						onClick={() => {
+							if (confirm("Clear current canvas?")) {
+								useWorkflowStore.setState({ nodes: [], edges: [], workflowId: null });
+							}
+						}}
+						className="flex items-center gap-2 px-3 py-2 bg-[#222] border border-white/10 text-red-500/80 text-xs font-bold rounded-lg hover:bg-red-500/10 transition-all">
+						CLEAR
+					</button>
+
+					{/* Import Button */}
+					<button
+						onClick={handleImport}
+						className="flex items-center gap-2 px-3 py-2 bg-[#222] border border-white/10 text-white text-xs font-bold rounded-lg hover:bg-white/10 transition-all">
+						IMPORT
+					</button>
+
+					{/* Share (Export) Button */}
 					<button
 						onClick={handleShare}
 						className="flex items-center gap-2 px-3 py-2 bg-[#222] border border-white/10 text-white text-xs font-bold rounded-lg hover:bg-white/10 transition-all group">
 						<Share2 size={14} className="group-hover:text-[#dfff4f] transition-colors" />
-						SHARE
+						EXPORT
 					</button>
 
 					{/* Save Button */}
@@ -182,7 +220,7 @@ export default function Header() {
 						disabled={isSaving || isRunning}
 						className="flex items-center gap-2 px-4 py-2 bg-[#dfff4f] text-black text-xs font-bold rounded-lg hover:bg-white transition-all disabled:opacity-50 hover:scale-105 active:scale-95 shadow-[0_0_10px_rgba(223,255,79,0.2)]">
 						{isRunning ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} fill="currentColor" />}
-						{isRunning ? "RUNNING..." : "RUN"}
+						{isRunning ? "RUNNING..." : selectedNodes.length > 0 ? `RUN SELECTED (${selectedNodes.length})` : "RUN"}
 					</button>
 				</div>
 			</header>

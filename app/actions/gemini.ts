@@ -10,7 +10,8 @@ export async function generateContent(
     imageUrls: string[] = []
 ) {
     try {
-        const geminiModel = genAI.getGenerativeModel({ model });
+        const apiVersion = model.includes("1.5") || model.includes("2.") || model.includes("3.") ? "v1beta" : "v1";
+        const geminiModel = genAI.getGenerativeModel({ model }, { apiVersion });
 
         if (imageUrls.length > 0) {
             const imageParts = imageUrls.map((base64String) => {

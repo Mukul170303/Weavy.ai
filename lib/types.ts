@@ -52,9 +52,10 @@ export interface ImageNodeData extends BaseNodeData {
 // -- LLM / Generation Node --
 export interface LLMNodeData extends BaseNodeData {
     // Configuration
-    model: 'gemini-2.5-flash';
+    model: string;
     temperature: number;
-    systemInstruction?: string;
+    systemPrompt?: string;
+    prompt?: string;
     maxTokens?: number;
 
     // Dynamic Input Handles
@@ -100,7 +101,7 @@ export interface CropImageNodeData extends BaseNodeData {
 
 // -- Extract Frame Node --
 export interface ExtractFrameNodeData extends BaseNodeData {
-    timestamp: string; // e.g. "00:00:05" or "5s" or "10%"
+    timestamp?: string; // e.g. "00:00:05" or "5s" or "10%"
     outputUrl?: string; // Resulting image URL
 }
 

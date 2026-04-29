@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import type { LLMNodeData, LLMNodeType, TextNodeData, ImageNodeData } from "@/lib/types";
 import { useWorkflowStore } from "@/store/workflow-store";
 import { useAuth } from "@clerk/nextjs";
+import { runSelectedNodesAction } from "@/app/actions/workflowActions";
 
 // Helper to fetch base64
 async function urlToBase64(url: string): Promise<string> {
@@ -36,7 +37,7 @@ export default function LLMNode({ id, data, isConnectable, selected }: NodeProps
 	const [copied, setCopied] = useState(false);
 	const [showMenu, setShowMenu] = useState(false);
 	const menuRef = useRef<HTMLDivElement>(null);
-	const [model, setModel] = useState<string>(data.model || "gemini-1.5-flash");
+	const [model, setModel] = useState<string>(data.model || "gemini-2.5-flash");
 
 	const imageHandleCount = data.imageHandleCount ?? 1;
 
@@ -69,6 +70,11 @@ export default function LLMNode({ id, data, isConnectable, selected }: NodeProps
 		[id, updateNodeData],
 	);
 
+	// Connection detection for grey-out logic
+	const allEdges = getEdges();
+	const isSystemPromptConnected = allEdges.some(edge => edge.target === id && edge.targetHandle === "system-prompt");
+	const isPromptConnected = allEdges.some(edge => edge.target === id && edge.targetHandle === "prompt");
+
 	const handleCopy = useCallback(async () => {
 		if (data.outputs && data.outputs.length > 0) {
 			const textToCopy = data.outputs[data.outputs.length - 1].content;
@@ -99,6 +105,9 @@ export default function LLMNode({ id, data, isConnectable, selected }: NodeProps
 	);
 
 	const handleRun = useCallback(async () => {
+		// 🚫 Prevent re-trigger if already in flight
+		if (data.status === "loading") return;
+
 		if (!userId) {
 			updateNodeData(id, { status: "error", errorMessage: "You must be signed in." });
 			return;
@@ -110,8 +119,11 @@ export default function LLMNode({ id, data, isConnectable, selected }: NodeProps
 			const allEdges = getEdges();
 			const incomingEdges = allEdges.filter((edge) => edge.target === id);
 
-			let systemPromptBase = "";
-			let userPromptBase = "";
+			const isSysConn = allEdges.some((e) => e.target === id && e.targetHandle === "system-prompt");
+			const isPromptConn = allEdges.some((e) => e.target === id && e.targetHandle === "prompt");
+
+			let systemPromptBase = isSysConn ? "" : (data.systemPrompt || "");
+			let userPromptBase = isPromptConn ? "" : (data.prompt || "");
 			let incomingContext = "";
 			const imageUrls: string[] = [];
 
@@ -145,15 +157,22 @@ export default function LLMNode({ id, data, isConnectable, selected }: NodeProps
 					const imageUrl = nodeData.file?.url || nodeData.image || nodeData.outputUrl;
 
 					if (imageUrl && typeof imageUrl === "string") {
-						if (imageUrl.startsWith("data:")) {
-							imageUrls.push(imageUrl);
-						} else if (imageUrl.startsWith("/") || imageUrl.startsWith("http")) {
+						const isLocal = imageUrl.startsWith("/") ||
+							imageUrl.startsWith("blob:") ||
+							imageUrl.includes("localhost") ||
+							imageUrl.includes("127.0.0.1") ||
+							imageUrl.includes(window.location.hostname);
+
+						if (isLocal) {
 							try {
 								const base64 = await urlToBase64(imageUrl);
 								imageUrls.push(base64);
 							} catch (error) {
-								console.error(error);
+								console.error(`[LLMNode] Failed to base64 local asset: ${imageUrl}`, error);
+								imageUrls.push(imageUrl);
 							}
+						} else {
+							imageUrls.push(imageUrl);
 						}
 					}
 				}
@@ -162,76 +181,40 @@ export default function LLMNode({ id, data, isConnectable, selected }: NodeProps
 			const finalSystemPrompt = systemPromptBase + (incomingContext || "");
 			const finalUserPrompt = userPromptBase || "Process this request.";
 
-			const response = await fetch("/api/trigger/llm", {
+			const response = await fetch("/api/llm/execute", {
 				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
+				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					model: data.model,
+					model: data.model || "gemini-2.5-flash",
 					prompt: finalUserPrompt,
-					systemPrompt: finalSystemPrompt || undefined,
-					imageUrls: imageUrls.length > 0 ? imageUrls : undefined,
+					systemPrompt: finalSystemPrompt,
+					imageUrls: imageUrls,
 					temperature: data.temperature || 0.7,
-					userId: userId,
 				}),
 			});
 
 			const result = await response.json();
 
-			if (!response.ok) {
-				throw new Error(result.error || "Failed to start generation");
+			if (!response.ok || !result.success) {
+				throw new Error(result.error || "Failed to complete generation");
 			}
 
-			const { runId } = result;
-
-			const pollRunStatus = async (runId: string) => {
-				const maxAttempts = 180; // 6 mins max (polling every 2s)
-				let attempts = 0;
-
-				while (attempts < maxAttempts) {
-					const statusRes = await fetch(`/api/trigger/status?runId=${runId}`);
-					const statusData = await statusRes.json();
-
-					if (statusData.status === "SUCCESS") {
-						return statusData.output;
-					} else if (statusData.status === "FAILED" || statusData.status === "CANCELED") {
-						throw new Error("Task failed during processing");
-					}
-
-					attempts++;
-					await new Promise(r => setTimeout(r, 2000));
-				}
-				throw new Error("Task timeout");
-			};
-
-			const taskOutput = await pollRunStatus(runId);
-			let finalContent = "No output.";
-			if (typeof taskOutput.text === "string") {
-				finalContent = taskOutput.text;
-			} else if (typeof taskOutput === "string") {
-				finalContent = taskOutput;
-			} else {
-				finalContent = JSON.stringify(taskOutput, null, 2);
-			}
-
+			// 🚀 SUCCESS: Update state immediately
 			updateNodeData(id, {
 				status: "success",
 				outputs: [
-					{
-						id: crypto.randomUUID(),
-						type: "text",
-						content: finalContent,
-						timestamp: Date.now(),
-					},
+					...(data.outputs || []),
+					{ type: "text", content: result.text, timestamp: Date.now() },
 				],
 			});
+			console.log(`[LLMNode] Execution completed via route.ts directly`);
+
 		} catch (error: unknown) {
 			console.error("Run Failed:", error);
 			const errorMessage = error instanceof Error ? error.message : "Unknown error";
 			updateNodeData(id, { status: "error", errorMessage });
 		}
-	}, [id, updateNodeData, getNodes, getEdges, data.model, data.temperature, userId]);
+	}, [id, data.status, data.model, data.temperature, updateNodeData, getNodes, getEdges, userId]);
 
 	return (
 		<div
@@ -249,7 +232,10 @@ export default function LLMNode({ id, data, isConnectable, selected }: NodeProps
 			{/* Header */}
 			<div className="flex items-center justify-between px-3 py-2.5 border-b border-white/5 bg-[#111] rounded-t-xl">
 				<div className="flex items-center gap-2">
-					<span className="text-xs font-semibold text-white">{data.model || "gemini-1.5-flash"}</span>
+					<Bot size={14} className="text-[#dfff4f]" />
+					<span className="text-[10px] font-black text-white/40 uppercase tracking-widest leading-none">LLM Worker</span>
+					<span className="text-[10px] text-white/20">|</span>
+					<span className="text-[10px] font-semibold text-white/70">{data.model?.includes("2.5") ? "Gemini 2.5" : (data.model || "Gemini 2.5 Flash")}</span>
 				</div>
 
 				<div className="relative" ref={menuRef}>
@@ -285,10 +271,54 @@ export default function LLMNode({ id, data, isConnectable, selected }: NodeProps
 					value={model}
 					onChange={onModelChange}
 					className="w-full bg-[#0a0a0a] text-xs text-white rounded-lg border border-white/10 p-2 focus:outline-none focus:border-[#dfff4f]/50 cursor-pointer mb-3">
-					<option value="gemini-1.5-flash">Gemini 1.5 Flash (Recommended)</option>
-					<option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
-					<option value="gemini-2.0-flash-exp">Gemini 2.0 Flash (Experimental)</option>
+					<option value="gemini-2.5-flash">Gemini 2.5 Flash (Recommended)</option>
+					<option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+					<option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash Lite</option>
+					<option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Next Gen)</option>
 				</select>
+
+				{/* Manual Inputs with Connected State Detection */}
+				<div className="space-y-3 mb-3">
+					<div>
+						<label className="flex items-center justify-between text-[10px] text-white/40 uppercase font-semibold mb-1 px-1">
+							System Prompt
+							{isSystemPromptConnected && <span className="text-[9px] text-emerald-400/80 normal-case lowercase font-normal italic">Connected to Handle</span>}
+						</label>
+						<textarea
+							value={data.systemPrompt || ""}
+							onChange={(e) => updateNodeData(id, { systemPrompt: e.target.value })}
+							disabled={isSystemPromptConnected}
+							placeholder={isSystemPromptConnected ? "Using connected input..." : "System instructions..."}
+							className={cn(
+								"nodrag w-full bg-[#0a0a0a] text-xs text-white rounded-lg border p-2 focus:outline-none transition-all resize-none",
+								isSystemPromptConnected
+									? "border-emerald-500/30 text-white/20 placeholder:text-white/10 bg-emerald-500/5 cursor-not-allowed"
+									: "border-white/10 focus:border-[#dfff4f]/50"
+							)}
+							rows={2}
+						/>
+					</div>
+
+					<div>
+						<label className="flex items-center justify-between text-[10px] text-white/40 uppercase font-semibold mb-1 px-1">
+							User Message
+							{isPromptConnected && <span className="text-[9px] text-pink-400/80 normal-case lowercase font-normal italic">Connected to Handle</span>}
+						</label>
+						<textarea
+							value={data.prompt || ""}
+							onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
+							disabled={isPromptConnected}
+							placeholder={isPromptConnected ? "Using connected input..." : "User request..."}
+							className={cn(
+								"nodrag w-full bg-[#0a0a0a] text-xs text-white rounded-lg border p-2 focus:outline-none transition-all resize-none",
+								isPromptConnected
+									? "border-pink-500/30 text-white/20 placeholder:text-white/10 bg-pink-500/5 cursor-not-allowed"
+									: "border-white/10 focus:border-[#dfff4f]/50"
+							)}
+							rows={3}
+						/>
+					</div>
+				</div>
 
 				<div className="bg-[#2a2a2a] rounded-lg border border-white/10 flex flex-col flex-1 min-h-[150px]">
 					{data.status === "success" && data.outputs && data.outputs.length > 0 && (

@@ -1,16 +1,17 @@
 "use client";
 
-import React, {useEffect, useState} from "react";
-import {useParams} from "next/navigation";
-import {Loader2, Clock} from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
+import { Loader2, Clock } from "lucide-react";
 import dynamic from "next/dynamic";
 import Sidebar from "@/components/workflow/Sidebar";
 import SidebarNodeList from "@/components/workflow/SidebarNodeList";
 import Header from "@/components/workflow/Header";
-import {useWorkflowStore} from "@/store/workflow-store";
-import {loadWorkflowAction} from "@/app/actions/workflowActions";
-import {DEMO_WORKFLOWS} from "@/lib/demoWorkflows";
-import HistorySidebar from "@/components/workflow/HistorySidebar"; // Ensure this import exists
+import { useWorkflowStore } from "@/store/workflow-store";
+import { loadWorkflowAction } from "@/app/actions/workflowActions";
+import { DEMO_WORKFLOWS } from "@/lib/demoWorkflows";
+import HistorySidebar from "@/components/workflow/HistorySidebar";
+import { useWorkflowPolling } from "@/hooks/useWorkflowPolling";
 
 // 1. DYNAMIC IMPORT: Disables SSR for the Canvas
 // This replaces the need for useState/useEffect isMounted checks
@@ -22,12 +23,12 @@ export default function EditorPage() {
 	const params = useParams();
 	const workflowId = params.id as string;
 
+	// ACTIVATE GLOBAL POLLING: This hook listens for database updates 
+	// and syncs node status (loading -> success) across the canvas.
+	useWorkflowPolling();
+
 	const [loading, setLoading] = useState(true);
-	const {setWorkflowId} = useWorkflowStore();
-	const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-
-
-	const [isSidebarOpen, setSidebarOpen] = useState(true);
+	const { setWorkflowId, isHistoryOpen, setHistoryOpen } = useWorkflowStore();
 
 	useEffect(() => {
 		async function initializeWorkflow() {
@@ -44,7 +45,7 @@ export default function EditorPage() {
 				console.log("Loading Demo Template:", demo.name);
 
 				// Get the graph data from the function
-				const {nodes, edges} = demo.getGraph();
+				const { nodes, edges } = demo.getGraph();
 
 				useWorkflowStore.setState({
 					nodes: nodes,
@@ -143,15 +144,16 @@ export default function EditorPage() {
 					<FlowEditor />
 
 					{/* Sidebar Toggle Button */}
+					{/* Sidebar Toggle Button */}
 					<button
-						onClick={() => setSidebarOpen((open) => !open)}
+						onClick={() => setHistoryOpen(!isHistoryOpen)}
 						className="absolute top-4 right-4 z-10 bg-black/50 border border-white/20 text-white p-2 rounded hover:bg-white/10 transition-colors"
-						title={isSidebarOpen ? "Hide History" : "Show History"}>
+						title={isHistoryOpen ? "Hide History" : "Show History"}>
 						<Clock size={20} />
 					</button>
 
 					{/* Render Sidebar */}
-					{isSidebarOpen && <HistorySidebar workflowId={workflowId} isOpen={true} onClose={() => setSidebarOpen(false)} />}
+					{isHistoryOpen && <HistorySidebar workflowId={workflowId} isOpen={true} onClose={() => setHistoryOpen(false)} />}
 				</main>
 			</div>
 		</div>

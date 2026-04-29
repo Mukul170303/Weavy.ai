@@ -18,8 +18,8 @@ export default function AnimatedEdge({id, sourceX, sourceY, targetX, targetY, so
 			{/* 1. Define the Gradient specific to this edge ID */}
 			<defs>
 				<linearGradient id={`gradient-${id}`} gradientUnits="userSpaceOnUse" x1={sourceX} y1={sourceY} x2={targetX} y2={targetY}>
-					<stop offset="0%" stopColor="#ec4899" /> {/* Pink-500 (Source) */}
-					<stop offset="100%" stopColor="#dfff4f" /> {/* Lime/Green (Target) - Matches your theme */}
+					<stop offset="0%" stopColor="#9333ea" /> {/* Purple-600 */}
+					<stop offset="100%" stopColor="#c084fc" /> {/* Purple-400 */}
 				</linearGradient>
 			</defs>
 

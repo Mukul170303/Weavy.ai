@@ -15,6 +15,7 @@ import {
 } from "@xyflow/react";
 
 import { AppNode } from '@/lib/types';
+import { DEMO_WORKFLOWS } from "@/lib/demoWorkflows";
 
 type WorkflowState = {
     userId: string | null;
@@ -22,6 +23,8 @@ type WorkflowState = {
     edges: Edge[];
     workflowId: string | null;
     workflowName: string;
+    isHistoryOpen: boolean;
+
 
 
     // Actions
@@ -36,6 +39,11 @@ type WorkflowState = {
     setWorkflowId: (id: string) => void;
     setWorkflowName: (name: string) => void;
     clearUserData: () => void;
+    exportWorkflow: () => void;
+    importWorkflow: (json: string) => void;
+    loadSample: () => void;
+    setHistoryOpen: (open: boolean) => void;
+    saveWorkflow: () => Promise<string | null>;
 };
 
 // Initial Data - Empty canvas
@@ -51,6 +59,7 @@ export const useWorkflowStore = create<WorkflowState>()(
                 nodes: initialNodesData,
                 edges: initialEdges,
                 workflowName: "Untitled Workflow",
+                isHistoryOpen: false,
 
                 setUserId: (userId: string | null) => {
                     const currentUserId = get().userId;
@@ -85,9 +94,9 @@ export const useWorkflowStore = create<WorkflowState>()(
                     // Force the new connection to use our custom type
                     const edge = {
                         ...connection,
-                        type: 'animatedEdge', // Matches the key we will define in FlowEditor
-                        animated: true,       // Adds the "marching ants" animation automatically
-                        style: { strokeWidth: 3 },
+                        type: 'animatedEdge',
+                        animated: true,
+                        style: { stroke: '#a855f7', strokeWidth: 3 },
                     };
 
                     set({
@@ -148,24 +157,106 @@ export const useWorkflowStore = create<WorkflowState>()(
                         workflowName: "Untitled Workflow",
                     });
                 },
+
+                exportWorkflow: () => {
+                    const { nodes, edges, workflowName } = get();
+                    const exportData = {
+                        name: workflowName,
+                        nodes,
+                        edges,
+                        exportedAt: new Date().toISOString(),
+                    };
+                    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `${workflowName.replace(/\s+/g, '_')}_export.json`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                },
+
+                importWorkflow: (json: string) => {
+                    try {
+                        const data = JSON.parse(json);
+                        if (!data.nodes || !data.edges) throw new Error("Invalid workflow format");
+                        set({
+                            nodes: data.nodes,
+                            edges: data.edges,
+                            workflowName: data.name || "Imported Workflow",
+                            workflowId: null, // New imported workflow doesn't have a DB ID yet
+                        });
+                    } catch (error) {
+                        console.error("Import failed:", error);
+                        alert("Failed to import workflow. Please check the JSON file.");
+                    }
+                },
+
+                loadSample: () => {
+                    const { nodes, edges } = DEMO_WORKFLOWS.find(d => d.id === 'demo-marketing-kit')!.getGraph();
+                    set({
+                        nodes,
+                        edges,
+                        workflowName: "Product Marketing Kit (Demo)",
+                        workflowId: null,
+                    });
+                },
+                setHistoryOpen: (open: boolean) => set({ isHistoryOpen: open }),
+
+                saveWorkflow: async (): Promise<string | null> => {
+                    const { nodes, edges, workflowId, workflowName, setWorkflowId } = get();
+                    if (nodes.length === 0) {
+                        return null;
+                    }
+
+                    try {
+                        const { saveWorkflowAction } = await import("@/app/actions/workflowActions");
+                        const res = await saveWorkflowAction({
+                            id: workflowId,
+                            name: workflowName,
+                            nodes,
+                            edges,
+                        });
+
+                        if (res.success && res.id) {
+                            setWorkflowId(res.id);
+                            return res.id;
+                        }
+                        return null;
+                    } catch (error) {
+                        console.error("Store Save Error:", error);
+                        return null;
+                    }
+                },
             }),
             {
                 name: 'workflow-storage',
-                version: 4, // Incremented to clear old cached nodes
+                version: 5, // Bumped: strip runtime node state on persist to prevent infinite-loader on reload
 
-                // Partition storage by user ID
+                // Persist nodes but strip ALL runtime execution state so nodes never
+                // wake up in a 'loading' state after a page refresh.
                 partialize: (state) => ({
                     userId: state.userId,
-                    nodes: state.nodes,
+                    nodes: state.nodes.map((node) => ({
+                        ...node,
+                        data: {
+                            ...node.data,
+                            // Always reset execution state to idle before saving
+                            status: 'idle' as const,
+                            output: undefined,
+                            outputUrl: undefined,
+                            outputs: undefined,
+                            errorMessage: undefined,
+                        },
+                    })),
                     edges: state.edges,
                     workflowId: state.workflowId,
                     workflowName: state.workflowName,
                 } as unknown as WorkflowState),
 
                 migrate: (persistedState: unknown, version: number) => {
-                    const state = persistedState as WorkflowState;
-                    if (version < 4) {
-                        // Clear old data when migrating
+                    // Any version older than 5: wipe and start fresh to avoid stale loading states
+                    if (version < 5) {
                         return {
                             userId: null,
                             nodes: initialNodesData,
@@ -177,23 +268,24 @@ export const useWorkflowStore = create<WorkflowState>()(
                     return persistedState as WorkflowState;
                 },
 
-                // Use dynamic storage key based on user ID
+                // Fix: getItem must return the FULL serialised object {state, version}
+                // so that the migrate() callback and version checks work correctly.
                 storage: {
                     getItem: (name: string) => {
+                        // Try user-specific key first (written by setItem below)
+                        // We don't know the userId here, so fall back to the generic key.
                         const str = localStorage.getItem(name);
                         if (!str) return null;
-                        const { state } = JSON.parse(str);
-                        return state;
+                        // Return the full object — NOT just .state — so Zustand can
+                        // read the version field and run migrate() when needed.
+                        return JSON.parse(str);
                     },
                     setItem: (name: string, value: any) => {
                         // Zustand's persist wraps the state in { state: ..., version: ... }
                         const userId = value.state?.userId;
                         // Store with user-specific key if user is logged in
                         const key = userId ? `${name}-${userId}` : name;
-                        localStorage.setItem(
-                            key,
-                            JSON.stringify(value)
-                        );
+                        localStorage.setItem(key, JSON.stringify(value));
                     },
                     removeItem: (name: string) => {
                         // Remove both generic and user-specific keys

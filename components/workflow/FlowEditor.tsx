@@ -23,6 +23,7 @@ import VideoNode from "@/components/workflow/nodes/VideoNode";
 import CropImageNode from "@/components/workflow/nodes/CropImageNode";
 import ExtractFrameNode from "@/components/workflow/nodes/ExtractFrameNode";
 import { useWorkflowStore } from "@/store/workflow-store";
+import { useWorkflowPolling } from "@/hooks/useWorkflowPolling";
 import CanvasControls from "./CanvasControls";
 import { useStore } from "zustand";
 import { AppNode } from "@/lib/types";
@@ -46,6 +47,9 @@ function FlowContent() {
     const { screenToFlowPosition } = useReactFlow();
     const { undo, redo } = useStore(useWorkflowStore.temporal);
 
+    // 🔗 Mount Global Polling Hook
+    useWorkflowPolling();
+
     // UI State for Hand/Pan Mode
     const [isHandMode, setIsHandMode] = useState(false);
 
@@ -60,7 +64,11 @@ function FlowContent() {
             if (!sourceNode || !targetNode) return false;
 
             if (connection.targetHandle?.startsWith("image")) {
-                if (sourceNode.type !== "imageNode") return false;
+                const isValidImageSource =
+                    sourceNode.type === "imageNode" ||
+                    sourceNode.type === "cropImageNode" ||
+                    sourceNode.type === "extractFrameNode";
+                if (!isValidImageSource) return false;
             }
 
             if (connection.targetHandle === "prompt" || connection.targetHandle === "system-prompt") {
@@ -196,7 +204,7 @@ function FlowContent() {
                 panOnScroll={true}
                 nodesDraggable={!isHandMode}
             >
-                <Background color="#333" gap={20} size={1} />
+                <Background color="#333" gap={20} size={1} variant={"dots" as any} />
 
                 <MiniMap
                     className="bg-[#1a1a1a] border border-white/10 !bottom-4 !right-4"

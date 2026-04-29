@@ -6,8 +6,6 @@ import { Video, Upload, X, Loader2, AlertCircle, MoreHorizontal, Trash2 } from "
 import { cn } from "@/lib/utils";
 import { VideoNodeType } from "@/lib/types";
 import { useWorkflowStore } from "@/store/workflow-store";
-import { supabase } from "@/lib/supabase";
-import { v4 as uuidv4 } from "uuid";
 
 export default function VideoNode({ id, data, isConnectable, selected }: NodeProps<VideoNodeType>) {
     const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
@@ -29,15 +27,6 @@ export default function VideoNode({ id, data, isConnectable, selected }: NodePro
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
-    const fileToBase64 = (file: File): Promise<string> => {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = (error) => reject(error);
-        });
-    };
-
     const onFileChange = useCallback(
         async (evt: React.ChangeEvent<HTMLInputElement>) => {
             const file = evt.target.files?.[0];
@@ -46,38 +35,23 @@ export default function VideoNode({ id, data, isConnectable, selected }: NodePro
             try {
                 updateNodeData(id, { status: "loading", errorMessage: undefined });
                 
-                // 1. Generate a unique filename
-                const fileExt = file.name.split('.').pop();
-                const fileName = `${uuidv4()}.${fileExt}`;
-                const filePath = `uploads/${fileName}`;
-
-                // 2. Upload to Supabase Storage
-                // Note: Bucket 'videos' must be created in Supabase Dashboard
-                const { error: uploadError } = await supabase.storage
-                    .from('videos')
-                    .upload(filePath, file);
-
-                if (uploadError) throw uploadError;
-
-                // 3. Get Public URL
-                const { data: { publicUrl } } = supabase.storage
-                    .from('videos')
-                    .getPublicUrl(filePath);
+                const { uploadToTransloadit } = await import("@/lib/transloadit");
+                const url = await uploadToTransloadit(file);
 
                 updateNodeData(id, {
                     file: {
-                        url: publicUrl,
+                        url,
                         name: file.name,
                         type: file.type,
                     },
                     status: "success",
                     videoUrl: undefined,
                 });
-            } catch (err) {
-                console.error("Upload Error:", err);
+            } catch (err: any) {
+                console.error("Video Upload Failed:", err);
                 updateNodeData(id, {
                     status: "error",
-                    errorMessage: err instanceof Error ? err.message : "Failed to upload video",
+                    errorMessage: err instanceof Error ? err.message : "Failed to process video asset",
                 });
             }
         },
@@ -100,11 +74,14 @@ export default function VideoNode({ id, data, isConnectable, selected }: NodePro
                 selected ? "border-[#dfff4f] ring-1 ring-[#dfff4f]/50" : "border-white/10 hover:border-white/30",
                 data.status === "error" && "border-red-500 ring-1 ring-red-500/50"
             )}>
-            {/* Header */}
+            {/* Glow effect */}
+            {data.status === "loading" && (
+                <div className="absolute -inset-[1px] rounded-xl border-2 border-[#dfff4f] shadow-[0_0_30px_rgba(223,255,79,0.3)] animate-pulse pointer-events-none z-50" />
+            )}
             <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/5 bg-[#111] rounded-t-xl">
                 <div className="flex items-center gap-2">
                     <Video size={14} className="text-white/50" />
-                    <span className="text-xs font-semibold text-white/70">{data.label || "Video Input"}</span>
+                    <span className="text-xs font-semibold text-white/70">{data.label || "Video Source"}</span>
                 </div>
 
                 <div className="relative" ref={menuRef}>
@@ -126,20 +103,19 @@ export default function VideoNode({ id, data, isConnectable, selected }: NodePro
                                 }}
                                 className="w-full text-left px-3 py-2 text-[10px] text-red-400 hover:bg-red-500/10 hover:text-red-300 flex items-center gap-2 transition-colors font-medium">
                                 <Trash2 size={10} />
-                                Delete Node
+                                Delete
                             </button>
                         </div>
                     )}
                 </div>
             </div>
 
-            {/* Body */}
             <div className="p-3">
                 <input ref={fileInputRef} type="file" accept="video/*" onChange={onFileChange} className="hidden" id={`video-upload-${id}`} />
 
                 {videoSrc ? (
                     <div className="relative group">
-                        <video src={videoSrc} controls className="w-full h-40 object-cover rounded-lg border border-white/10" />
+                        <video src={videoSrc} controls className="w-full h-40 object-cover rounded-lg border border-white/10 shadow-lg" />
 
                         <button
                             onClick={clearVideo}
@@ -147,8 +123,8 @@ export default function VideoNode({ id, data, isConnectable, selected }: NodePro
                             <X size={14} />
                         </button>
 
-                        <div className="mt-2 text-[10px] text-white/40 truncate">
-                            {data.file?.name || "Video"}
+                        <div className="mt-2 text-[10px] text-white/40 truncate italic px-1">
+                            {data.file?.name || "unnamed_video.mp4"}
                         </div>
                     </div>
                 ) : (
@@ -159,32 +135,29 @@ export default function VideoNode({ id, data, isConnectable, selected }: NodePro
                             data.status === "loading" ? "border-white/20 bg-white/5" : "border-white/10 hover:border-white/30 hover:bg-white/5"
                         )}>
                         {data.status === "loading" ? (
-                            <Loader2 size={24} className="animate-spin text-white/30" />
+                            <Loader2 size={24} className="animate-spin text-white/20" />
                         ) : data.status === "error" ? (
                             <>
-                                <AlertCircle size={24} className="text-red-400 mb-2" />
-                                <span className="text-xs text-red-400">{data.errorMessage}</span>
+                                <AlertCircle size={20} className="text-red-500/50 mb-2" />
+                                <span className="text-[10px] text-red-400/80 text-center px-4 leading-relaxed">{data.errorMessage}</span>
                             </>
                         ) : (
                             <>
-                                <Upload size={24} className="text-white/30 mb-2" />
-                                <span className="text-xs text-white/50">Click to upload video</span>
+                                <Upload size={24} className="text-white/20 mb-2" />
+                                <span className="text-xs text-white/30 font-medium">Click to upload video</span>
                             </>
                         )}
                     </label>
                 )}
             </div>
 
-            {/* The Pin (Handle) */}
-            <div className="absolute -right-1.5 top-1/2 -translate-y-1/2 z-50">
-                <Handle
-                    type="source"
-                    position={Position.Right}
-                    id="output"
-                    isConnectable={isConnectable}
-                    className="!w-3 !h-3 !bg-[#1a1a1a] !border-2 !border-blue-400 hover:!bg-blue-400 transition-colors"
-                />
-            </div>
+            <Handle
+                type="source"
+                position={Position.Right}
+                id="output"
+                isConnectable={isConnectable}
+                className="!w-2 !h-4 !rounded-sm !bg-blue-400 !border-none -right-1"
+            />
         </div>
     );
 }
