@@ -25,6 +25,10 @@ interface ExecutionContext {
         text?: string;
         imageUrls?: string[];
         videoUrl?: string;
+        url?: string;
+        image?: string;
+        outputUrl?: string;
+        file?: { url?: string };
     };
 }
 
@@ -308,7 +312,8 @@ async function executeExtractFrameNode(node: NodeData, edges: EdgeData[], contex
     if (!videoEdge) return {};
 
     const sourceData = context[videoEdge.source];
-    if (!sourceData?.videoUrl) return {};
+    const videoUrl = sourceData?.videoUrl || sourceData?.url || sourceData?.outputUrl || sourceData?.file?.url;
+    if (!videoUrl) return {};
 
     // Dynamic Parameter Resolution: Check if 'timestamp' is connected to an output
     const timestampEdge = edges.find(e => e.target === node.id && e.targetHandle === "timestamp");
@@ -331,13 +336,13 @@ async function executeExtractFrameNode(node: NodeData, edges: EdgeData[], contex
             nodeLabel: node.data.label || "Extract Frame",
             status: "RUNNING",
             startedAt: new Date(),
-            inputData: JSON.stringify({ ...node.data, videoUrl: sourceData.videoUrl, resolvedTimestamp: timestamp })
+            inputData: JSON.stringify({ ...node.data, videoUrl, resolvedTimestamp: timestamp })
         }
     });
 
     try {
         const result = await extractFrameTask.triggerAndWait({
-            sourceUrl: sourceData.videoUrl,
+            sourceUrl: videoUrl,
             timestamp,
             nodeId: node.id
         });
@@ -374,7 +379,7 @@ async function executeCropImageNode(node: NodeData, edges: EdgeData[], context: 
 
     const sourceData = context[imageEdge.source];
     // Resilient input resolution: check both normalized and raw task outputs
-    const sourceUrl = sourceData?.imageUrls?.[0] || sourceData?.url || sourceData?.image;
+    const sourceUrl = sourceData?.imageUrls?.[0] || sourceData?.url || sourceData?.image || sourceData?.outputUrl || sourceData?.file?.url;
     if (!sourceUrl) return {};
 
     // Dynamic Parameter Resolution for Crop
