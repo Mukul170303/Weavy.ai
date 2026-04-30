@@ -24,14 +24,22 @@ interface AIJobPayload {
  */
 async function resilientFetch(url: string): Promise<Response> {
     try {
-        const resp = await fetch(url);
+        let targetUrl = url;
+        if (url.startsWith("/")) {
+            // Assume it's a public asset on the app server
+            targetUrl = `http://localhost:3001${url}`;
+            console.log(`   📡 [Worker] Transforming relative path to: ${targetUrl}`);
+        }
+
+        const resp = await fetch(targetUrl);
         if (resp.ok) return resp;
         throw new Error(`Fetch failed: ${resp.status} ${resp.statusText}`);
     } catch (e) {
-        if (url.includes("localhost")) {
-            const fallbackUrl = url.replace("localhost", "127.0.0.1");
-            console.log(`   📡 [Worker] Localhost fetch failed. Retrying with 127.0.0.1: ${fallbackUrl}`);
-            return await fetch(fallbackUrl);
+        if (url.includes("localhost") || url.startsWith("/")) {
+            // Pre-process the URL for retry
+            const base = url.startsWith("/") ? `http://127.0.0.1:3001${url}` : url.replace("localhost", "127.0.0.1");
+            console.log(`   📡 [Worker] Initial fetch failed. Retrying with fallback: ${base}`);
+            return await fetch(base);
         }
         if (url.includes("127.0.0.1")) {
             const fallbackUrl = url.replace("127.0.0.1", "localhost");
@@ -149,6 +157,10 @@ export const cropImageTask = task({
 
         await new Promise((resolve, reject) => {
             ffmpeg(tempInput)
+                .outputOptions([
+                    '-frames:v 1',
+                    '-q:v 2' // High quality for images
+                ])
                 .videoFilters(`crop=in_w*${width}/100:in_h*${height}/100:in_w*${x}/100:in_h*${y}/100`)
                 .on('end', resolve)
                 .on('error', (err) => {
@@ -184,7 +196,8 @@ export const extractFrameTask = task({
 
         console.log(`🎞️ [Worker] Starting Extract Frame Task for Node: ${payload.nodeId} at ${timestamp}`);
 
-        const tempInput = path.join(os.tmpdir(), `input_vid_${Date.now()}.mp4`);
+        const inputExt = sourceUrl.includes('.webm') ? 'webm' : 'mp4';
+        const tempInput = path.join(os.tmpdir(), `input_vid_${Date.now()}.${inputExt}`);
         const tempOutput = path.join(os.tmpdir(), `output_frame_${Date.now()}.jpg`);
 
         if (sourceUrl.startsWith('data:')) {
@@ -197,10 +210,35 @@ export const extractFrameTask = task({
             fs.writeFileSync(tempInput, Buffer.from(buffer));
         }
 
+        // Handle percentage-based timestamps (e.g. "15%")
+        let finalTimestamp = timestamp;
+        if (timestamp.endsWith('%')) {
+            const percentage = parseFloat(timestamp.replace('%', ''));
+            if (!isNaN(percentage)) {
+                try {
+                    const duration = await new Promise<number>((resolve, reject) => {
+                        ffmpeg.ffprobe(tempInput, (err, metadata) => {
+                            if (err) reject(err);
+                            else resolve(metadata.format.duration || 0);
+                        });
+                    });
+                    
+                    if (duration > 0) {
+                        const seconds = (duration * percentage) / 100;
+                        finalTimestamp = seconds.toString();
+                        console.log(`   🎞️ [Worker] Converted ${timestamp} to ${finalTimestamp}s (Duration: ${duration}s)`);
+                    }
+                } catch (probeErr) {
+                    console.warn("   ⚠️ [Worker] ffprobe failed to get duration, using fallback 00:00:01", probeErr);
+                    finalTimestamp = "00:00:01";
+                }
+            }
+        }
+
         await new Promise((resolve, reject) => {
             ffmpeg(tempInput)
                 .screenshots({
-                    timestamps: [timestamp],
+                    timestamps: [finalTimestamp],
                     filename: path.basename(tempOutput),
                     folder: path.dirname(tempOutput),
                     size: '100%x100%'

@@ -1,116 +1,62 @@
-import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
+import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const API_KEY = process.env.GEMINI_API_KEY;
-
-if (!API_KEY) {
-  console.error("❌ GEMINI_API_KEY missing");
+// Initialize Gemini
+if (!process.env.GEMINI_API_KEY) {
+  console.error("❌ CRITICAL: GEMINI_API_KEY is missing from environment variables!");
 }
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "dummy-key");
 
-const genAI = new GoogleGenerativeAI(API_KEY || "");
-
-const ExecuteSchema = z.object({
-  model: z.string(),
-  prompt: z.string().optional(),
-  systemPrompt: z.string().optional(),
-  imageUrls: z.array(z.string()).optional(),
-  temperature: z.number().optional(),
-});
-
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
+  console.log("🚀 [API] Received LLM Execution Request");
   try {
-    console.log("✅ API HIT");
-
     const body = await req.json();
-    console.log("📦 BODY:", body);
+    console.log("📦 [API] Request Body:", JSON.stringify(body, null, 2));
+    const { prompt, systemPrompt, imageUrls, model: modelName = "gemini-2.5-flash", temperature = 0.7 } = body;
 
-    const data = ExecuteSchema.parse(body);
-
-    let finalPrompt = data.prompt?.trim() || "";
-
-    if (data.systemPrompt?.trim()) {
-      finalPrompt = data.systemPrompt + "\n\n" + finalPrompt;
+    if (!prompt) {
+      return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
     }
 
-    if (!finalPrompt && (!data.imageUrls || data.imageUrls.length === 0)) {
-      return NextResponse.json(
-        { success: false, error: "No input provided" },
-        { status: 400 }
-      );
+    // Strict Model Whitelist
+    const validModels = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.1-flash-lite-preview", "gemini-3.1-pro-preview"];
+    let finalModelName = modelName;
+    if (!validModels.includes(finalModelName)) {
+      finalModelName = "gemini-2.5-flash";
     }
 
-    if (!finalPrompt) {
-      finalPrompt = "Describe the given images in detail.";
+    const apiVersion = finalModelName.includes("1.5") || finalModelName.includes("2.") || finalModelName.includes("3.") ? "v1beta" : "v1";
+    const model = genAI.getGenerativeModel({ model: finalModelName }, { apiVersion });
+
+    const parts: any[] = [];
+    let fullText = prompt;
+    if (systemPrompt) {
+      fullText = `System Instructions: ${systemPrompt}\n\nUser Request: ${prompt}`;
     }
+    parts.push({ text: fullText });
 
-    const modelName = data.model || "gemini-2.5-flash";
-    const apiVersion = modelName.includes("1.5") || modelName.includes("2.") || modelName.includes("3.") ? "v1beta" : "v1";
-
-    const model = genAI.getGenerativeModel({
-      model: modelName,
-      generationConfig: {
-        temperature: data.temperature ?? 0.7,
-      },
-    }, { apiVersion });
-
-    let parts: any[] = [{ text: finalPrompt }];
-
-    if (data.imageUrls?.length) {
-      for (const img of data.imageUrls) {
-        if (img.startsWith("data:")) {
-          const mimeType = img.substring(img.indexOf(":") + 1, img.indexOf(";"));
-          const base64 = img.split(",")[1];
-
-          parts.push({
-            inlineData: { data: base64, mimeType },
-          });
+    if (imageUrls && imageUrls.length > 0) {
+      for (const url of imageUrls) {
+        if (url.startsWith("data:")) {
+          const base64Data = url.split(",")[1];
+          const mimeType = url.substring(url.indexOf(":") + 1, url.indexOf(";"));
+          parts.push({ inlineData: { data: base64Data, mimeType } });
         } else {
-          try {
-            const response = await fetch(img);
-            const buffer = Buffer.from(await response.arrayBuffer());
-
-            parts.push({
-              inlineData: {
-                data: buffer.toString("base64"),
-                mimeType: response.headers.get("content-type") || "image/jpeg",
-              },
-            });
-          } catch (err) {
-            console.error("❌ Image fetch failed:", err);
-          }
+          // For remote URLs, we'd need to fetch them here, but for simplicity we'll skip 
+          // as the client should send base64 for local/connected nodes.
+          // If we need remote fetch, we can add it later.
+          console.warn("[API] Remote URL provided but fetch skipped in sync route.");
         }
       }
     }
 
-    // ✅ CORRECT Gemini call
-    const result = await model.generateContent({
-      contents: [
-        {
-          role: "user",
-          parts: parts,
-        },
-      ],
-    });
+    const result = await model.generateContent(parts);
+    const response = await result.response;
+    const text = response.text();
 
-    const text = result.response.text();
-
-    console.log("✅ LLM RESPONSE:", text);
-
-    return NextResponse.json({
-      success: true,
-      text,
-    });
-
+    return NextResponse.json({ success: true, text });
   } catch (error: any) {
-    console.error("❌ API ERROR:", error);
-
-    return NextResponse.json(
-      {
-        success: false,
-        error: error.message || "Something went wrong",
-      },
-      { status: 500 }
-    );
+    console.error("LLM Execution Failed:", error);
+    return NextResponse.json({ error: error.message || "Failed to generate content" }, { status: 500 });
   }
 }

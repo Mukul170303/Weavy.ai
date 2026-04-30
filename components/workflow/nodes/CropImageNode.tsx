@@ -48,29 +48,55 @@ export default function CropImageNode({ id, data, isConnectable, selected }: Nod
         try {
             updateNodeData(id, { status: "loading", errorMessage: undefined });
 
-            let workflowIdInStore = useWorkflowStore.getState().workflowId;
-            if (!workflowIdInStore || isNaN(parseInt(String(workflowIdInStore)))) {
-                console.log("[Node] No valid ID found, auto-saving...");
-                const savedId = await useWorkflowStore.getState().saveWorkflow();
-                if (!savedId) {
-                    throw new Error("Failed to auto-save workflow. Please save manually.");
-                }
-                workflowIdInStore = savedId;
+            // 1. Find the connected image source
+            const imageEdge = edges.find(e => e.target === id && e.targetHandle === "image-input");
+            if (!imageEdge) {
+                throw new Error("Please connect an image source first.");
             }
 
-            const result = await runSelectedNodesAction(String(workflowIdInStore), [id]);
-
-            if (!result.success) {
-                throw new Error(result.error || "Failed to start processing");
+            const sourceNode = getNodes().find(n => n.id === imageEdge.source);
+            if (!sourceNode) {
+                throw new Error("Source node not found.");
             }
 
-            console.log(`[CropImageNode] Task triggered via orchestrator: ${result.runId}`);
+            // Standardized data flow: look for outputUrl
+            const sourceUrl = (sourceNode.data as any).outputUrl || (sourceNode.data as any).file?.url || (sourceNode.data as any).image;
+            
+            if (!sourceUrl) {
+                throw new Error("Source node has no output. Please run the source node first.");
+            }
+
+            // 2. Call the direct API
+            const response = await fetch("/api/crop", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    imageUrl: sourceUrl,
+                    x,
+                    y,
+                    width,
+                    height
+                })
+            });
+
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(result.error || "Failed to crop image");
+            }
+
+            console.log(`[CropImageNode] Success!`);
+            
+            updateNodeData(id, { 
+                status: "success", 
+                outputUrl: result.outputUrl 
+            });
 
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : "Failed to crop image";
             updateNodeData(id, { status: "error", errorMessage });
         }
-    }, [id, updateNodeData]);
+    }, [id, updateNodeData, edges, getNodes, x, y, width, height]);
 
     return (
         <div
@@ -116,7 +142,7 @@ export default function CropImageNode({ id, data, isConnectable, selected }: Nod
                 </div>
             </div>
 
-            <div className="p-4 flex-1 flex flex-col space-y-4">
+            <div className="p-3 flex-1 flex flex-col space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                     {[
                         { label: 'X (%)', field: 'x', value: x, connected: isXConnected },
@@ -173,13 +199,13 @@ export default function CropImageNode({ id, data, isConnectable, selected }: Nod
                 )}
 
                 {data.outputUrl && data.status !== "error" && (
-                    <div className="overflow-hidden rounded-lg border border-white/10 bg-black/50">
-                        <img src={data.outputUrl} alt="Preview" className="w-full h-32 object-contain" />
+                    <div className="overflow-hidden rounded-lg border border-white/10 bg-black/50 h-40 flex items-center justify-center shadow-lg">
+                        <img src={data.outputUrl} alt="Preview" className="w-full h-full object-cover" />
                     </div>
                 )}
             </div>
 
-            <div className="px-4 pb-4">
+            <div className="px-3 pb-3">
                 <button
                     onClick={handleRun}
                     disabled={data.status === "loading" || !isImageConnected}
@@ -194,20 +220,22 @@ export default function CropImageNode({ id, data, isConnectable, selected }: Nod
                 </button>
             </div>
 
+            {/* Main Input Handle (Top Left) */}
             <Handle
                 type="target"
                 position={Position.Left}
                 id="image-input"
                 isConnectable={isConnectable}
-                className="!w-2 !h-4 !rounded-sm !bg-purple-500 !border-none -left-1"
+                className="!w-3 !h-3 !bg-purple-500 !border-2 !border-[#1a1a1a] -left-1.5 top-12"
             />
 
+            {/* Result Output Handle (Middle Right) */}
             <Handle
                 type="source"
                 position={Position.Right}
                 id="output"
                 isConnectable={isConnectable}
-                className="!w-2 !h-4 !rounded-sm !bg-purple-500 !border-none -right-1"
+                className="!w-3 !h-3 !bg-purple-500 !border-2 !border-[#1a1a1a] -right-1.5"
             />
         </div>
     );

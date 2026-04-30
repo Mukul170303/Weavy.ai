@@ -14,10 +14,10 @@ export const DEMO_WORKFLOWS = [
                     type: 'imageNode',
                     position: { x: 0, y: 0 },
                     data: {
-                        label: 'Front View',
+                        label: 'Headphones - Front',
                         status: 'success',
                         inputType: 'upload',
-                        image: '/demo/shoe-front.jpg'
+                        image: '/demo/headphones.png'
                     }
                 },
                 {
@@ -25,10 +25,10 @@ export const DEMO_WORKFLOWS = [
                     type: 'imageNode',
                     position: { x: 0, y: 350 },
                     data: {
-                        label: 'Side View',
+                        label: 'Headphones - Side',
                         status: 'success',
                         inputType: 'upload',
-                        image: '/demo/shoe-side.jpg'
+                        image: '/demo/headphones-side.png'
                     }
                 },
                 {
@@ -36,10 +36,10 @@ export const DEMO_WORKFLOWS = [
                     type: 'imageNode',
                     position: { x: 0, y: 700 },
                     data: {
-                        label: 'Detail View',
+                        label: 'Headphones - Detail',
                         status: 'success',
                         inputType: 'upload',
-                        image: '/demo/shoe-detail.jpg'
+                        image: '/demo/headphones-detail.png'
                     }
                 },
                 {
@@ -49,7 +49,7 @@ export const DEMO_WORKFLOWS = [
                     data: {
                         label: 'Analyst Instructions',
                         status: 'idle',
-                        text: `You are a Senior Product Analyst. Analyze these 3 product images.`
+                        text: `You are a Senior Product Analyst. Analyze these 3 headphone images.`
                     }
                 },
                 {
@@ -80,85 +80,131 @@ export const DEMO_WORKFLOWS = [
         }
     },
     {
-        id: "demo-marketing-kit",
-        name: "Product Marketing Kit",
-        description: "Advanced workflow using Video, Frame extraction, and Image cropping.",
-        thumbnail: "🎬",
+        id: "demo-marketing-suite",
+        name: "Product Marketing Kit Generator",
+        description: "Advanced workflow with parallel Image & Video processing converged into a final marketing post.",
+        thumbnail: "🚀",
         getGraph: (): { nodes: AppNode[], edges: Edge[] } => {
             const nodes: AppNode[] = [
+                // BRANCH A: Image & Product Details
                 {
-                    id: 'video-src',
-                    type: 'videoNode',
-                    position: { x: 0, y: 100 },
-                    data: {
-                        label: 'Raw Demo Video',
-                        status: 'success',
-                        videoUrl: 'https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4'
-                    }
-                },
-                {
-                    id: 'img-src',
+                    id: 'upload-image',
                     type: 'imageNode',
-                    position: { x: 0, y: 400 },
+                    position: { x: 0, y: 350 },
                     data: {
-                        label: 'Hero Product Image',
+                        label: 'Product Hero Shot',
                         status: 'success',
-                        image: '/demo/shoe-front.jpg'
+                        inputType: 'upload',
+                        image: '/demo/headphones.png'
                     }
                 },
                 {
-                    id: 'extract-node',
+                    id: 'crop-image',
+                    type: 'cropImageNode',
+                    position: { x: 300, y: 350 },
+                    data: {
+                        label: 'Crop Center (80%)',
+                        status: 'idle',
+                        x: 10, y: 10, width: 80, height: 80
+                    }
+                },
+                {
+                    id: 'text-sys-1',
+                    type: 'textNode',
+                    position: { x: 300, y: 650 },
+                    data: {
+                        label: 'Copywriter Role',
+                        status: 'idle',
+                        text: 'You are a professional marketing copywriter. Generate a compelling one-paragraph product description.'
+                    }
+                },
+                {
+                    id: 'text-details',
+                    type: 'textNode',
+                    position: { x: 300, y: 800 },
+                    data: {
+                        label: 'Product Details',
+                        status: 'idle',
+                        text: 'Product: Wireless Bluetooth Headphones. Features: Noise cancellation, 30-hour battery, foldable design.'
+                    }
+                },
+                {
+                    id: 'llm-node-1',
+                    type: 'llmNode',
+                    position: { x: 700, y: 500 },
+                    data: {
+                        label: 'Description Generator',
+                        status: 'idle',
+                        model: 'gemini-2.5-flash',
+                        imageHandleCount: 1,
+                        outputs: [],
+                        temperature: 0.7,
+                        viewMode: 'single'
+                    }
+                },
+                // BRANCH B: Video Processing
+                {
+                    id: 'upload-video',
+                    type: 'videoNode',
+                    position: { x: 0, y: 0 },
+                    data: {
+                        label: 'Product Demo Video',
+                        status: 'success',
+                        videoUrl: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.webm'
+                    }
+                },
+                {
+                    id: 'extract-frame',
                     type: 'extractFrameNode',
                     position: { x: 300, y: 0 },
                     data: {
-                        label: 'Extract Key Frame',
+                        label: 'Extract Middle Frame',
                         status: 'idle',
-                        timestamp: '00:00:02'
+                        timestamp: '50%'
                     }
                 },
+                // CONVERGENCE: Final Marketing Generator
                 {
-                    id: 'crop-node',
-                    type: 'cropImageNode',
-                    position: { x: 300, y: 300 },
-                    data: {
-                        label: 'Portrait Crop (9:16)',
-                        status: 'idle',
-                        x: 25, y: 0, width: 50, height: 100
-                    }
-                },
-                {
-                    id: 'prompt-node',
+                    id: 'text-sys-2',
                     type: 'textNode',
-                    position: { x: 300, y: 600 },
+                    position: { x: 700, y: 100 },
                     data: {
-                        label: 'Creative Directive',
+                        label: 'Social Media Manager',
                         status: 'idle',
-                        text: 'Analyze the extracted video frame and product image to create a high-converting ad copy.'
+                        text: 'You are a social media manager. Create a tweet-length marketing post based on the product image and video frame.'
                     }
                 },
                 {
-                    id: 'llm-worker',
+                    id: 'llm-node-2',
                     type: 'llmNode',
-                    position: { x: 700, y: 300 },
+                    position: { x: 1100, y: 300 },
                     data: {
-                        label: 'Creative Director AI',
+                        label: 'Final Marketing Kit',
                         status: 'idle',
                         model: 'gemini-2.5-flash',
                         imageHandleCount: 2,
                         outputs: [],
                         temperature: 0.8,
-                        viewMode: 'single',
-                        systemPrompt: 'Senior Copywriter'
+                        viewMode: 'single'
                     }
                 }
             ];
 
             const edges: Edge[] = [
-                { id: 'e-v-ext', source: 'video-src', target: 'extract-node', targetHandle: 'video-input', type: 'animatedEdge', animated: true },
-                { id: 'e-i-crop', source: 'img-src', target: 'crop-node', targetHandle: 'image-input', type: 'animatedEdge', animated: true },
-                { id: 'e-ext-llm', source: 'extract-node', target: 'llm-worker', targetHandle: 'image-0', type: 'animatedEdge', animated: true },
-                { id: 'e-crop-llm', source: 'crop-node', target: 'llm-worker', targetHandle: 'image-1', type: 'animatedEdge', animated: true },
-                { id: 'e-prompt-llm', source: 'prompt-node', target: 'llm-worker', targetHandle: 'system-prompt', type: 'default' }
+                // Branch A Connections
+                { id: 'e-i-crop', source: 'upload-image', target: 'crop-image', targetHandle: 'image-input', type: 'animatedEdge', animated: true },
+                { id: 'e-c-llm1', source: 'crop-image', target: 'llm-node-1', targetHandle: 'image-0', type: 'animatedEdge', animated: true },
+                { id: 'e-ts1-llm1', source: 'text-sys-1', target: 'llm-node-1', targetHandle: 'system-prompt', type: 'default' },
+                { id: 'e-tp1-llm1', source: 'text-details', target: 'llm-node-1', targetHandle: 'prompt', type: 'default' },
+                
+                // Branch B Connections
+                { id: 'e-v-ext', source: 'upload-video', target: 'extract-frame', targetHandle: 'video-input', type: 'animatedEdge', animated: true },
+                
+                // Convergence Connections
+                { id: 'e-ts2-llm2', source: 'text-sys-2', target: 'llm-node-2', targetHandle: 'system-prompt', type: 'default' },
+                { id: 'e-llm1-llm2', source: 'llm-node-1', target: 'llm-node-2', targetHandle: 'prompt', type: 'default' },
+                { id: 'e-c1-llm2', source: 'crop-image', target: 'llm-node-2', targetHandle: 'image-0', type: 'animatedEdge', animated: true },
+                { id: 'e-ext1-llm2', source: 'extract-frame', target: 'llm-node-2', targetHandle: 'image-1', type: 'animatedEdge', animated: true }
             ];
 
             return { nodes, edges };

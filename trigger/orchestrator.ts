@@ -175,6 +175,22 @@ export const orchestrator = task({
             console.log(`[Orchestrator] Seeded context with ${uniqueResults.size} historical node results.`);
         }
 
+        // 🚀 NEW: ALWAYS SEED PASSIVE INPUT NODES (Text, Image, Video)
+        // This ensures selective runs (like 'Run Crop') always have their source data.
+        nodes.forEach(node => {
+            if (node.type === "textNode") {
+                context[node.id] = { text: node.data.text };
+            } else if (node.type === "imageNode") {
+                const url = node.data.file?.url || node.data.image;
+                if (url) context[node.id] = { imageUrls: [url] };
+            } else if (node.type === "videoNode") {
+                const url = node.data.file?.url || node.data.videoUrl;
+                if (url) context[node.id] = { videoUrl: url };
+            }
+        });
+        console.log(`[Orchestrator] Seeded context with ${nodes.filter(n => ["textNode", "imageNode", "videoNode"].includes(n.type)).length} passive input nodes.`);
+
+
         // Execute each phase in sequence, but nodes within each phase in parallel
         for (const phaseNodes of layeredPlan) {
             await Promise.all(phaseNodes.map(async (node) => {
@@ -298,9 +314,13 @@ async function executeExtractFrameNode(node: NodeData, edges: EdgeData[], contex
     const timestampEdge = edges.find(e => e.target === node.id && e.targetHandle === "timestamp");
     let timestamp = node.data.timestamp || "00:00:01";
 
-    if (timestampEdge && context[timestampEdge.source]?.text) {
-        timestamp = context[timestampEdge.source].text!;
-        console.log(`[Orchestrator] Resolved timestamp from node ${timestampEdge.source}: ${timestamp}`);
+    if (timestampEdge) {
+        const timestampSource = context[timestampEdge.source];
+        const resolvedVal = timestampSource?.text || (typeof timestampSource === 'string' ? timestampSource : undefined);
+        if (resolvedVal) {
+            timestamp = resolvedVal;
+            console.log(`[Orchestrator] Resolved timestamp from node ${timestampEdge.source}: ${timestamp}`);
+        }
     }
 
     const executionRecord = await prisma.nodeExecution.create({
@@ -323,15 +343,22 @@ async function executeExtractFrameNode(node: NodeData, edges: EdgeData[], contex
         });
 
         if (result.ok && result.output.success) {
+            const normalizedOutput = { 
+                ...result.output, 
+                imageUrls: [result.output.url],
+                // Ensure outputUrl is also present for UI consistency
+                outputUrl: result.output.url 
+            };
+            
             await prisma.nodeExecution.update({
                 where: { id: executionRecord.id },
                 data: {
                     status: "SUCCESS",
                     finishedAt: new Date(),
-                    outputData: JSON.stringify(result.output)
+                    outputData: JSON.stringify(normalizedOutput)
                 }
             });
-            return { imageUrls: [result.output.url] };
+            return normalizedOutput;
         } else {
             throw new Error("Extract Frame failed");
         }
@@ -346,7 +373,9 @@ async function executeCropImageNode(node: NodeData, edges: EdgeData[], context: 
     if (!imageEdge) return {};
 
     const sourceData = context[imageEdge.source];
-    if (!sourceData?.imageUrls?.[0]) return {};
+    // Resilient input resolution: check both normalized and raw task outputs
+    const sourceUrl = sourceData?.imageUrls?.[0] || sourceData?.url || sourceData?.image;
+    if (!sourceUrl) return {};
 
     // Dynamic Parameter Resolution for Crop
     const paramHandles = ["x", "y", "width", "height"] as const;
@@ -359,12 +388,15 @@ async function executeCropImageNode(node: NodeData, edges: EdgeData[], context: 
 
     for (const handle of paramHandles) {
         const edge = edges.find(e => e.target === node.id && e.targetHandle === handle);
-        if (edge && context[edge.source]?.text) {
-            // Convert to number if it's a param handle
-            const val = parseFloat(context[edge.source].text!);
-            if (!isNaN(val)) {
-                resolvedParams[handle] = val;
-                console.log(`[Orchestrator] Resolved ${handle} from node ${edge.source}: ${val}`);
+        if (edge) {
+            const paramSource = context[edge.source];
+            const rawVal = paramSource?.text || (typeof paramSource === 'string' ? paramSource : undefined);
+            if (rawVal) {
+                const val = parseFloat(rawVal);
+                if (!isNaN(val)) {
+                    resolvedParams[handle] = val;
+                    console.log(`[Orchestrator] Resolved ${handle} from node ${edge.source}: ${val}`);
+                }
             }
         }
     }
@@ -377,27 +409,33 @@ async function executeCropImageNode(node: NodeData, edges: EdgeData[], context: 
             nodeLabel: node.data.label || "Crop Image",
             status: "RUNNING",
             startedAt: new Date(),
-            inputData: JSON.stringify({ ...node.data, imageUrl: sourceData.imageUrls[0], resolvedParams })
+            inputData: JSON.stringify({ ...node.data, imageUrl: sourceUrl, resolvedParams })
         }
     });
 
     try {
         const result = await cropImageTask.triggerAndWait({
-            sourceUrl: sourceData.imageUrls[0],
+            sourceUrl: sourceUrl,
             ...resolvedParams,
             nodeId: node.id
         });
 
         if (result.ok && result.output.success) {
+            const normalizedOutput = { 
+                ...result.output, 
+                imageUrls: [result.output.url],
+                outputUrl: result.output.url 
+            };
+
             await prisma.nodeExecution.update({
                 where: { id: executionRecord.id },
                 data: {
                     status: "SUCCESS",
                     finishedAt: new Date(),
-                    outputData: JSON.stringify(result.output)
+                    outputData: JSON.stringify(normalizedOutput)
                 }
             });
-            return { imageUrls: [result.output.url] };
+            return normalizedOutput;
         } else {
             throw new Error("Crop Image failed");
         }

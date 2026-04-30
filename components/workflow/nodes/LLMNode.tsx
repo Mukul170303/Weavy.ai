@@ -8,6 +8,7 @@ import type { LLMNodeData, LLMNodeType, TextNodeData, ImageNodeData } from "@/li
 import { useWorkflowStore } from "@/store/workflow-store";
 import { useAuth } from "@clerk/nextjs";
 import { runSelectedNodesAction } from "@/app/actions/workflowActions";
+import { executeLLMAction } from "@/app/actions/llmActions";
 
 // Helper to fetch base64
 async function urlToBase64(url: string): Promise<string> {
@@ -154,7 +155,7 @@ export default function LLMNode({ id, data, isConnectable, selected }: NodeProps
 
 				if ((sourceNode.type === "imageNode" || sourceNode.type === "extractFrameNode" || sourceNode.type === "cropImageNode") && edge.targetHandle?.startsWith("image")) {
 					const nodeData = sourceNode.data as (ImageNodeData & { outputUrl?: string });
-					const imageUrl = nodeData.file?.url || nodeData.image || nodeData.outputUrl;
+					const imageUrl = nodeData.outputUrl || nodeData.file?.url || nodeData.image;
 
 					if (imageUrl && typeof imageUrl === "string") {
 						const isLocal = imageUrl.startsWith("/") ||
@@ -181,21 +182,15 @@ export default function LLMNode({ id, data, isConnectable, selected }: NodeProps
 			const finalSystemPrompt = systemPromptBase + (incomingContext || "");
 			const finalUserPrompt = userPromptBase || "Process this request.";
 
-			const response = await fetch("/api/llm/execute", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					model: data.model || "gemini-2.5-flash",
-					prompt: finalUserPrompt,
-					systemPrompt: finalSystemPrompt,
-					imageUrls: imageUrls,
-					temperature: data.temperature || 0.7,
-				}),
+			const result = await executeLLMAction({
+				model: model || "gemini-2.5-flash",
+				prompt: finalUserPrompt,
+				systemPrompt: finalSystemPrompt,
+				imageUrls: imageUrls,
+				temperature: data.temperature || 0.7,
 			});
 
-			const result = await response.json();
-
-			if (!response.ok || !result.success) {
+			if (!result.success) {
 				throw new Error(result.error || "Failed to complete generation");
 			}
 
@@ -235,7 +230,9 @@ export default function LLMNode({ id, data, isConnectable, selected }: NodeProps
 					<Bot size={14} className="text-[#dfff4f]" />
 					<span className="text-[10px] font-black text-white/40 uppercase tracking-widest leading-none">LLM Worker</span>
 					<span className="text-[10px] text-white/20">|</span>
-					<span className="text-[10px] font-semibold text-white/70">{data.model?.includes("2.5") ? "Gemini 2.5" : (data.model || "Gemini 2.5 Flash")}</span>
+					<span className="text-[10px] font-semibold text-white/70">
+						{model.includes("2.5") ? "Gemini 2.5" : model.includes("3.1") ? "Gemini 3.1" : model}
+					</span>
 				</div>
 
 				<div className="relative" ref={menuRef}>

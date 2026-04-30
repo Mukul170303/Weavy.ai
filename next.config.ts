@@ -16,12 +16,24 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "images.unsplash.com",
       },
+      {
+        protocol: "https",
+        hostname: "nrhlbmrdkmazxuphgbdj.supabase.co",
+      },
     ],
   },
   experimental: {
     serverActions: {
       bodySizeLimit: "10mb",
     },
+    serverComponentsExternalPackages: [
+      "ffmpeg-static",
+      "ffprobe-static",
+      "@ffmpeg-installer/ffmpeg",
+      "fluent-ffmpeg",
+      "sharp",
+      "transloadit"
+    ],
   },
 };
 

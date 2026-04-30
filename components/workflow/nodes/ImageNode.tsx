@@ -65,6 +65,7 @@ export default function ImageNode({id, data, isConnectable, selected}: NodeProps
                     },
                     status: "success",
                     image: undefined,
+                    outputUrl: cloudUrl, // Standardized output
                 });
             } catch (err: any) {
                 console.error("Image Processing Error:", err);

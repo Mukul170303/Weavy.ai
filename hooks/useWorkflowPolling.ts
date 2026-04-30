@@ -77,36 +77,43 @@ export function useWorkflowPolling() {
                 const res = await getWorkflowHistoryAction(workflowId);
 
                 if (res.success && res.runs && res.runs.length > 0) {
-                    const latestRun = res.runs[0];
-                    if (!latestRun.nodes || latestRun.nodes.length === 0) return;
+                    // 🚀 NEW: Poll ALL recent runs, not just the latest one
+                    // This ensures that if multiple nodes were triggered in separate batches,
+                    // we find results for all of them.
+                    res.runs.forEach((run: any) => {
+                        if (!run.nodes) return;
 
-                    latestRun.nodes.forEach((execNode: any) => {
-                        const node = currentNodes.find(n => n.id === execNode.nodeId);
-                        if (!node) return;
+                        run.nodes.forEach((execNode: any) => {
+                            const node = currentNodes.find(n => n.id === execNode.nodeId);
+                            if (!node) return;
 
-                        if (execNode.status === "SUCCESS" && node.data.status === "loading") {
-                            const parsedOutput = execNode.output || {};
-                            const resultUrl = parsedOutput.url || parsedOutput.imageUrls?.[0] || parsedOutput.videoUrl;
-                            const resultContent = parsedOutput.text
-                                || (typeof parsedOutput === 'string' ? parsedOutput : JSON.stringify(parsedOutput));
+                            // Only update if the node is still in a 'loading' state in the UI
+                            if (execNode.status === "SUCCESS" && node.data.status === "loading") {
+                                const parsedOutput = execNode.output || {};
+                                const resultUrl = parsedOutput.outputUrl || parsedOutput.url || parsedOutput.imageUrls?.[0] || parsedOutput.videoUrl;
+                                const resultContent = parsedOutput.text
+                                    || (typeof parsedOutput === 'string' ? parsedOutput : JSON.stringify(parsedOutput));
 
-                            updateNodeDataRef.current(execNode.nodeId, {
-                                status: "success",
-                                output: resultContent,
-                                outputUrl: resultUrl,
-                                outputs: [{
-                                    id: execNode.id,
-                                    type: "text",
-                                    content: resultContent,
-                                    timestamp: Date.now()
-                                }]
-                            });
-                        } else if (execNode.status === "FAILED" && node.data.status === "loading") {
-                            updateNodeDataRef.current(execNode.nodeId, {
-                                status: "idle",
-                                errorMessage: execNode.error
-                            });
-                        }
+                                console.log(`[Polling] Syncing SUCCESS for node ${node.id} from run ${run.id}`);
+                                updateNodeDataRef.current(node.id, {
+                                    status: "success",
+                                    output: resultContent,
+                                    outputUrl: resultUrl,
+                                    outputs: [{
+                                        id: execNode.id,
+                                        type: "text",
+                                        content: resultContent,
+                                        timestamp: Date.now()
+                                    }]
+                                });
+                            } else if (execNode.status === "FAILED" && node.data.status === "loading") {
+                                console.log(`[Polling] Syncing FAILURE for node ${node.id} from run ${run.id}`);
+                                updateNodeDataRef.current(node.id, {
+                                    status: "idle",
+                                    errorMessage: execNode.error
+                                });
+                            }
+                        });
                     });
                 }
             } catch (error) {

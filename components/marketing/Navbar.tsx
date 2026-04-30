@@ -16,18 +16,18 @@ export default function Navbar() {
   });
 
   return (
-    <>
+    <div className="fixed top-0 w-full z-50">
       {/* 🔴 TOP BLACK ANNOUNCEMENT BAR */}
-      <section className="bg-black text-white py-1">
+      <section className="bg-black text-white py-2 relative z-50">
         <div className="max-w-9xl mx-auto flex items-center justify-center gap-3">
           <Image
             src="https://cdn.prod.website-files.com/681b040781d5b5e278a69989/69032e91ec29a8f27508fa9c_Image-Figma_acc.avif"
             alt="Figma Logo"
-            width={50}
-            height={50}
+            width={45}
+            height={45}
             className="object-contain"
           />
-          <p className="text-lg md:text-lg font-semibold tracking-wide text-center">
+          <p className="text-sm md:text-base font-semibold tracking-wide text-center">
             Weavy is now a part of Figma
           </p>
         </div>
@@ -37,19 +37,24 @@ export default function Navbar() {
       <motion.header
         animate={{ height: isScrolled ? 60 : 72 }}
         transition={{ duration: 0.3, ease: "easeInOut" }}
-        className="fixed top-10 w-full z-40 backdrop-blur-md border-b border-black/5 bg-white/80"
+        className="w-full backdrop-blur-md border-b border-black/5 bg-white/80"
       >
         <div className="h-full px-8 xl:px-16 flex items-center justify-between">
 
           {/* LEFT SIDE */}
-          <div className="flex items-center gap-6">
-            <div className="w-6 h-6 bg-black rounded-sm flex items-center justify-center">
-              <div className="w-3 h-3 border-2 border-white rounded-sm"></div>
+          <Link href="/" className="flex items-center gap-6 group">
+            <div className="w-8 h-8 relative flex items-center justify-center">
+              <Image
+                src="https://cdn.prod.website-files.com/681b040781d5b5e278a69989/682b76283538127bf3907ded_Frame%20427321089.svg"
+                alt="Weavy Logo"
+                fill
+                className="object-contain transition-transform group-hover:scale-110 brightness-0"
+              />
             </div>
 
             <div className="flex items-center gap-4 text-black">
-              <span className="font-semibold text-lg tracking-tight">
-                WEAVY
+              <span className="font-semibold text-xl tracking-tight uppercase">
+                Weavy AI
               </span>
 
               <div className="h-5 w-px bg-black/20"></div>
@@ -58,7 +63,7 @@ export default function Navbar() {
                 Artistic Intelligence
               </span>
             </div>
-          </div>
+          </Link>
 
           {/* RIGHT SIDE */}
           <div className="flex items-center gap-8">
@@ -127,7 +132,7 @@ export default function Navbar() {
           </div>
         </div>
       </motion.header>
-    </>
+    </div>
   );
 }
 

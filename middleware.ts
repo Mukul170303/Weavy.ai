@@ -4,12 +4,15 @@ const isPublicRoute = createRouteMatcher([
   "/",
   "/sign-in(.*)",
   "/sign-up(.*)",
-  "/api/trigger(.*)", // Allow Trigger.dev calls and polling to be public
+  "/api/trigger(.*)", 
+  "/api/crop(.*)",
+  "/api/extract-frame(.*)",
+  "/api/llm/execute(.*)",
 ]);
 
-export default clerkMiddleware((auth, req) => {
+export default clerkMiddleware(async (auth, req) => {
   if (!isPublicRoute(req)) {
-    auth.protect();
+    await auth.protect();
   }
 });
 

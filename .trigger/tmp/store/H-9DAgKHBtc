@@ -1,0 +1,353 @@
+import {
+  aiGenerator,
+  cropImageTask,
+  extractFrameTask
+} from "../../../chunk-RLC6WJLK.mjs";
+import {
+  task
+} from "../../../chunk-2OMWR522.mjs";
+import "../../../chunk-GUCSW7BX.mjs";
+import {
+  __name,
+  init_esm
+} from "../../../chunk-H4SOERNS.mjs";
+
+// trigger/orchestrator.ts
+init_esm();
+import { PrismaClient } from "@prisma/client";
+var prisma = new PrismaClient();
+function getLayeredExecutionPlan(nodes, edges) {
+  const levels = /* @__PURE__ */ new Map();
+  const inDegree = /* @__PURE__ */ new Map();
+  const adj = /* @__PURE__ */ new Map();
+  nodes.forEach((n) => {
+    levels.set(n.id, 0);
+    inDegree.set(n.id, 0);
+    adj.set(n.id, []);
+  });
+  edges.forEach((edge) => {
+    if (adj.has(edge.source) && adj.has(edge.target)) {
+      adj.get(edge.source).push(edge.target);
+      inDegree.set(edge.target, (inDegree.get(edge.target) || 0) + 1);
+    }
+  });
+  const queue = [];
+  inDegree.forEach((degree, id) => {
+    if (degree === 0) queue.push(id);
+  });
+  const topoOrder = [];
+  while (queue.length > 0) {
+    const u = queue.shift();
+    topoOrder.push(u);
+    const neighbors = adj.get(u) || [];
+    for (const v of neighbors) {
+      levels.set(v, Math.max(levels.get(v) || 0, (levels.get(u) || 0) + 1));
+      inDegree.set(v, inDegree.get(v) - 1);
+      if (inDegree.get(v) === 0) queue.push(v);
+    }
+  }
+  if (topoOrder.length < nodes.length) {
+    throw new Error("Cycle detected or invalid graph.");
+  }
+  const layeredPlan = [];
+  levels.forEach((level, nodeId) => {
+    const node = nodes.find((n) => n.id === nodeId);
+    if (node) {
+      if (!layeredPlan[level]) layeredPlan[level] = [];
+      layeredPlan[level].push(node);
+    }
+  });
+  return layeredPlan.filter(Boolean);
+}
+__name(getLayeredExecutionPlan, "getLayeredExecutionPlan");
+var orchestrator = task({
+  id: "workflow-orchestrator",
+  run: /* @__PURE__ */ __name(async (payload) => {
+    console.log(`[Orchestrator] 🚀 Starting workflow run for ID: ${payload.runId}`);
+    try {
+      await prisma.$connect();
+      const count = await prisma.workflow.count();
+      console.log(`[Orchestrator] ✅ Database connected. Workflow count: ${count}`);
+    } catch (err) {
+      console.error(`[Orchestrator] ❌ DATABASE CONNECTION FAILED:`, err);
+      throw new Error("Worker could not connect to database. Check DATABASE_URL.");
+    }
+    let run = null;
+    let attempts = 0;
+    const maxAttempts = 3;
+    while (attempts < maxAttempts) {
+      try {
+        run = await prisma.workflowRun.findUnique({
+          where: { id: payload.runId },
+          include: { workflow: true }
+        });
+        break;
+      } catch (err) {
+        attempts++;
+        console.error(`📡 [Orchestrator] DB Connection Attempt ${attempts} failed.`, err);
+        if (attempts >= maxAttempts) throw err;
+        await new Promise((r) => setTimeout(r, 2e3));
+      }
+    }
+    if (!run) throw new Error(`Workflow run not found: ${payload.runId}`);
+    const graph = run.workflow.data;
+    const nodes = graph.nodes || [];
+    const edges = graph.edges || [];
+    let layeredPlan;
+    try {
+      layeredPlan = getLayeredExecutionPlan(nodes, edges);
+      if ((run.executionScope === "SELECTED" || run.executionScope === "SINGLE") && run.selectedNodeIds) {
+        const targetIds = JSON.parse(run.selectedNodeIds);
+        console.log(`[Orchestrator] Filtering for ${targetIds.length} target nodes: ${targetIds.join(", ")}`);
+        layeredPlan = layeredPlan.map((layer) => layer.filter((node) => targetIds.includes(node.id))).filter((layer) => layer.length > 0);
+      }
+    } catch (err) {
+      await prisma.workflowRun.update({
+        where: { id: run.id },
+        data: { status: "FAILED", finishedAt: /* @__PURE__ */ new Date() }
+      });
+      throw err;
+    }
+    const context = {};
+    if (run.executionScope !== "FULL") {
+      const previousExecutions = await prisma.nodeExecution.findMany({
+        where: {
+          run: { workflowId: run.workflowId },
+          status: "SUCCESS"
+        },
+        orderBy: { finishedAt: "desc" }
+      });
+      const uniqueResults = /* @__PURE__ */ new Map();
+      for (const exec of previousExecutions) {
+        if (!uniqueResults.has(exec.nodeId) && exec.outputData) {
+          uniqueResults.set(exec.nodeId, JSON.parse(exec.outputData));
+        }
+      }
+      uniqueResults.forEach((val, id) => {
+        context[id] = val;
+      });
+      console.log(`[Orchestrator] Seeded context with ${uniqueResults.size} historical node results.`);
+    }
+    for (const phaseNodes of layeredPlan) {
+      await Promise.all(phaseNodes.map(async (node) => {
+        let nodeResults = {};
+        if (node.type === "textNode") {
+          nodeResults = { text: node.data.text };
+        } else if (node.type === "imageNode") {
+          const url = node.data.file?.url || node.data.image;
+          if (url) nodeResults = { imageUrls: [url] };
+        } else if (node.type === "videoNode") {
+          const url = node.data.file?.url || node.data.videoUrl;
+          if (url) nodeResults = { videoUrl: url };
+        } else if (node.type === "llmNode") {
+          nodeResults = await executeLLMNode(node, edges, context, run.id);
+        } else if (node.type === "extractFrameNode") {
+          nodeResults = await executeExtractFrameNode(node, edges, context, run.id);
+        } else if (node.type === "cropImageNode") {
+          nodeResults = await executeCropImageNode(node, edges, context, run.id);
+        }
+        context[node.id] = nodeResults;
+      }));
+    }
+    await prisma.workflowRun.update({
+      where: { id: run.id },
+      data: { status: "COMPLETED", finishedAt: /* @__PURE__ */ new Date() }
+    });
+    return { success: true };
+  }, "run")
+});
+async function executeLLMNode(node, edges, context, runId) {
+  const incomingEdges = edges.filter((e) => e.target === node.id);
+  let aggregatedSystemPrompt = node.data.systemPrompt || "";
+  let aggregatedUserPrompt = node.data.prompt || "";
+  const aggregatedImages = [];
+  for (const edge of incomingEdges) {
+    const sourceData = context[edge.source];
+    if (!sourceData) continue;
+    if (sourceData.text) {
+      if (edge.targetHandle === "system-prompt") {
+        aggregatedSystemPrompt = (aggregatedSystemPrompt ? `${aggregatedSystemPrompt}
+
+` : "") + sourceData.text;
+      } else if (edge.targetHandle === "prompt") {
+        aggregatedUserPrompt = (aggregatedUserPrompt ? `${aggregatedUserPrompt}
+
+` : "") + sourceData.text;
+      }
+    }
+    if (sourceData.imageUrls) aggregatedImages.push(...sourceData.imageUrls);
+  }
+  console.log(`[Orchestrator] Logic triggered for Node: ${node.id} (${node.type})`);
+  if (!process.env.DATABASE_URL) {
+    console.error("❌ CRITICAL: DATABASE_URL is missing in Worker environment!");
+  }
+  let executionRecord;
+  try {
+    console.log(`[Orchestrator] Creating NodeExecution record for ${node.id}...`);
+    executionRecord = await prisma.nodeExecution.create({
+      data: {
+        runId,
+        nodeId: node.id,
+        nodeType: node.type,
+        nodeLabel: node.data.label || "LLM",
+        status: "RUNNING",
+        startedAt: /* @__PURE__ */ new Date(),
+        inputData: JSON.stringify({ ...node.data, contextInputs: { system: aggregatedSystemPrompt, user: aggregatedUserPrompt, images: aggregatedImages.length } })
+      }
+    });
+    console.log(`[Orchestrator] ✅ NodeExecution created: ${executionRecord.id}`);
+  } catch (dbErr) {
+    console.error(`[Orchestrator] ❌ Failed to create NodeExecution record in DB:`, dbErr);
+    throw dbErr;
+  }
+  try {
+    console.log(`[Orchestrator] Triggering aiGenerator for node ${node.id}...`);
+    const result = await aiGenerator.triggerAndWait({
+      prompt: aggregatedUserPrompt || "Analyze this input.",
+      systemPrompt: aggregatedSystemPrompt,
+      imageUrls: aggregatedImages,
+      model: node.data.model || "gemini-2.5-flash",
+      temperature: node.data.temperature
+    });
+    if (result.ok) {
+      const finishedAt = /* @__PURE__ */ new Date();
+      const duration = Math.round((finishedAt.getTime() - executionRecord.startedAt.getTime()) / 1e3);
+      await prisma.nodeExecution.update({
+        where: { id: executionRecord.id },
+        data: {
+          status: "SUCCESS",
+          finishedAt,
+          duration,
+          outputData: JSON.stringify(result.output)
+        }
+      });
+      return { text: result.output.text };
+    } else {
+      throw new Error(`AI Task failed: ${result.error}`);
+    }
+  } catch (error) {
+    await handleNodeFailure(executionRecord.id, error);
+    throw error;
+  }
+}
+__name(executeLLMNode, "executeLLMNode");
+async function executeExtractFrameNode(node, edges, context, runId) {
+  const videoEdge = edges.find((e) => e.target === node.id && e.targetHandle === "video-input");
+  if (!videoEdge) return {};
+  const sourceData = context[videoEdge.source];
+  if (!sourceData?.videoUrl) return {};
+  const timestampEdge = edges.find((e) => e.target === node.id && e.targetHandle === "timestamp");
+  let timestamp = node.data.timestamp || "00:00:01";
+  if (timestampEdge && context[timestampEdge.source]?.text) {
+    timestamp = context[timestampEdge.source].text;
+    console.log(`[Orchestrator] Resolved timestamp from node ${timestampEdge.source}: ${timestamp}`);
+  }
+  const executionRecord = await prisma.nodeExecution.create({
+    data: {
+      runId,
+      nodeId: node.id,
+      nodeType: node.type,
+      nodeLabel: node.data.label || "Extract Frame",
+      status: "RUNNING",
+      startedAt: /* @__PURE__ */ new Date(),
+      inputData: JSON.stringify({ ...node.data, videoUrl: sourceData.videoUrl, resolvedTimestamp: timestamp })
+    }
+  });
+  try {
+    const result = await extractFrameTask.triggerAndWait({
+      sourceUrl: sourceData.videoUrl,
+      timestamp,
+      nodeId: node.id
+    });
+    if (result.ok && result.output.success) {
+      await prisma.nodeExecution.update({
+        where: { id: executionRecord.id },
+        data: {
+          status: "SUCCESS",
+          finishedAt: /* @__PURE__ */ new Date(),
+          outputData: JSON.stringify(result.output)
+        }
+      });
+      return { imageUrls: [result.output.url] };
+    } else {
+      throw new Error("Extract Frame failed");
+    }
+  } catch (error) {
+    await handleNodeFailure(executionRecord.id, error);
+    throw error;
+  }
+}
+__name(executeExtractFrameNode, "executeExtractFrameNode");
+async function executeCropImageNode(node, edges, context, runId) {
+  const imageEdge = edges.find((e) => e.target === node.id && e.targetHandle === "image-input");
+  if (!imageEdge) return {};
+  const sourceData = context[imageEdge.source];
+  if (!sourceData?.imageUrls?.[0]) return {};
+  const paramHandles = ["x", "y", "width", "height"];
+  const resolvedParams = {
+    x: node.data.x ?? 0,
+    y: node.data.y ?? 0,
+    width: node.data.width ?? 100,
+    height: node.data.height ?? 100
+  };
+  for (const handle of paramHandles) {
+    const edge = edges.find((e) => e.target === node.id && e.targetHandle === handle);
+    if (edge && context[edge.source]?.text) {
+      const val = parseFloat(context[edge.source].text);
+      if (!isNaN(val)) {
+        resolvedParams[handle] = val;
+        console.log(`[Orchestrator] Resolved ${handle} from node ${edge.source}: ${val}`);
+      }
+    }
+  }
+  const executionRecord = await prisma.nodeExecution.create({
+    data: {
+      runId,
+      nodeId: node.id,
+      nodeType: node.type,
+      nodeLabel: node.data.label || "Crop Image",
+      status: "RUNNING",
+      startedAt: /* @__PURE__ */ new Date(),
+      inputData: JSON.stringify({ ...node.data, imageUrl: sourceData.imageUrls[0], resolvedParams })
+    }
+  });
+  try {
+    const result = await cropImageTask.triggerAndWait({
+      sourceUrl: sourceData.imageUrls[0],
+      ...resolvedParams,
+      nodeId: node.id
+    });
+    if (result.ok && result.output.success) {
+      await prisma.nodeExecution.update({
+        where: { id: executionRecord.id },
+        data: {
+          status: "SUCCESS",
+          finishedAt: /* @__PURE__ */ new Date(),
+          outputData: JSON.stringify(result.output)
+        }
+      });
+      return { imageUrls: [result.output.url] };
+    } else {
+      throw new Error("Crop Image failed");
+    }
+  } catch (error) {
+    await handleNodeFailure(executionRecord.id, error);
+    throw error;
+  }
+}
+__name(executeCropImageNode, "executeCropImageNode");
+async function handleNodeFailure(executionRecordId, error) {
+  await prisma.nodeExecution.update({
+    where: { id: executionRecordId },
+    data: {
+      status: "FAILED",
+      finishedAt: /* @__PURE__ */ new Date(),
+      error: String(error)
+    }
+  });
+}
+__name(handleNodeFailure, "handleNodeFailure");
+export {
+  orchestrator
+};
+//# sourceMappingURL=orchestrator.mjs.map

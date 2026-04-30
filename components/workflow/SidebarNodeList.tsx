@@ -3,15 +3,41 @@
 import React from "react";
 import { Search, Type, ImageIcon, Bot, Video, Crop, ImagePlay } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useWorkflowStore } from "@/store/workflow-store";
 
 interface SidebarNodeListProps {
 	isCollapsed?: boolean;
 }
 
 const SidebarNodeList = ({ isCollapsed }: SidebarNodeListProps) => {
+	const addNode = useWorkflowStore((state) => state.addNode);
+
 	const onDragStart = (event: React.DragEvent, nodeType: string) => {
 		event.dataTransfer.setData("application/reactflow", nodeType);
 		event.dataTransfer.effectAllowed = "move";
+	};
+
+	const handleAddNode = (type: string, label: string) => {
+		const newNodeId = crypto.randomUUID();
+		const position = { x: 100, y: 100 }; // Default position for clicks
+		
+		let data: any = { label, status: "idle" };
+		if (type === "cropImageNode") {
+			data = { ...data, x: 0, y: 0, width: 100, height: 100 };
+		} else if (type === "extractFrameNode") {
+			data = { ...data, timestamp: "00:00:01" };
+		} else if (type === "llmNode") {
+			data = { ...data, model: "gemini-2.5-flash", temperature: 0.7, viewMode: "single", outputs: [], imageHandleCount: 1 };
+		} else if (type === "imageNode" || type === "videoNode") {
+			data = { ...data, inputType: "upload" };
+		}
+
+		addNode({
+			id: newNodeId,
+			type,
+			position,
+			data,
+		});
 	};
 
 	return (
@@ -46,7 +72,8 @@ const SidebarNodeList = ({ isCollapsed }: SidebarNodeListProps) => {
 							isCollapsed ? "flex justify-center p-2" : "flex items-center gap-3"
 						)}
 						draggable
-						onDragStart={(e) => onDragStart(e, "textNode")}>
+						onDragStart={(e) => onDragStart(e, "textNode")}
+						onClick={() => handleAddNode("textNode", "Text Input")}>
 						<div className="w-8 h-8 rounded bg-blue-500/10 flex items-center justify-center text-blue-400 group-hover:text-blue-300">
 							<Type size={18} />
 						</div>
@@ -65,7 +92,8 @@ const SidebarNodeList = ({ isCollapsed }: SidebarNodeListProps) => {
 							isCollapsed ? "flex justify-center p-2" : "flex items-center gap-3"
 						)}
 						draggable
-						onDragStart={(e) => onDragStart(e, "imageNode")}>
+						onDragStart={(e) => onDragStart(e, "imageNode")}
+						onClick={() => handleAddNode("imageNode", "Image Input")}>
 						<div className="w-8 h-8 rounded bg-purple-500/10 flex items-center justify-center text-purple-400 group-hover:text-purple-300">
 							<ImageIcon size={18} />
 						</div>
@@ -84,7 +112,8 @@ const SidebarNodeList = ({ isCollapsed }: SidebarNodeListProps) => {
 							isCollapsed ? "flex justify-center p-2" : "flex items-center gap-3"
 						)}
 						draggable
-						onDragStart={(e) => onDragStart(e, "videoNode")}>
+						onDragStart={(e) => onDragStart(e, "videoNode")}
+						onClick={() => handleAddNode("videoNode", "Video Input")}>
 						<div className="w-8 h-8 rounded bg-blue-500/10 flex items-center justify-center text-blue-400 group-hover:text-blue-300">
 							<Video size={18} />
 						</div>
@@ -96,14 +125,15 @@ const SidebarNodeList = ({ isCollapsed }: SidebarNodeListProps) => {
 						)}
 					</div>
 
-					{/* 3. RUN ANY LLM NODE */}
+					{/* 4. RUN ANY LLM NODE */}
 					<div
 						className={cn(
 							"bg-[#1a1a1a] border border-white/5 hover:border-[#dfff4f]/50 rounded-lg p-3 cursor-grab active:cursor-grabbing transition-colors group",
 							isCollapsed ? "flex justify-center p-2" : "flex items-center gap-3"
 						)}
 						draggable
-						onDragStart={(e) => onDragStart(e, "llmNode")}>
+						onDragStart={(e) => onDragStart(e, "llmNode")}
+						onClick={() => handleAddNode("llmNode", "Gemini Worker")}>
 						<div className="w-8 h-8 rounded bg-[#dfff4f]/10 flex items-center justify-center text-[#dfff4f] group-hover:text-white">
 							<Bot size={18} />
 						</div>
@@ -122,14 +152,15 @@ const SidebarNodeList = ({ isCollapsed }: SidebarNodeListProps) => {
 							isCollapsed ? "flex justify-center p-2" : "flex items-center gap-3"
 						)}
 						draggable
-						onDragStart={(e) => onDragStart(e, "cropImageNode")}>
+						onDragStart={(e) => onDragStart(e, "cropImageNode")}
+						onClick={() => handleAddNode("cropImageNode", "Crop Image")}>
 						<div className="w-8 h-8 rounded bg-orange-500/10 flex items-center justify-center text-orange-400 group-hover:text-orange-300">
 							<Crop size={18} />
 						</div>
 						{!isCollapsed && (
 							<div>
 								<p className="text-sm font-medium text-white group-hover:text-[#dfff4f]">Crop Image</p>
-								<p className="text-[10px] text-white/40">Crop via FFMPEG</p>
+								<p className="text-[10px] text-white/40">FFMPEG via Trigger.dev</p>
 							</div>
 						)}
 					</div>
@@ -141,7 +172,8 @@ const SidebarNodeList = ({ isCollapsed }: SidebarNodeListProps) => {
 							isCollapsed ? "flex justify-center p-2" : "flex items-center gap-3"
 						)}
 						draggable
-						onDragStart={(e) => onDragStart(e, "extractFrameNode")}>
+						onDragStart={(e) => onDragStart(e, "extractFrameNode")}
+						onClick={() => handleAddNode("extractFrameNode", "Extract Frame")}>
 						<div className="w-8 h-8 rounded bg-pink-500/10 flex items-center justify-center text-pink-400 group-hover:text-pink-300">
 							<ImagePlay size={18} />
 						</div>

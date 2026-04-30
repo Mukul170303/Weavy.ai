@@ -193,11 +193,11 @@ export const useWorkflowStore = create<WorkflowState>()(
                 },
 
                 loadSample: () => {
-                    const { nodes, edges } = DEMO_WORKFLOWS.find(d => d.id === 'demo-marketing-kit')!.getGraph();
+                    const { nodes, edges } = DEMO_WORKFLOWS.find(d => d.id === 'demo-marketing-suite')!.getGraph();
                     set({
                         nodes,
                         edges,
-                        workflowName: "Product Marketing Kit (Demo)",
+                        workflowName: "Ultimate Marketing Suite (Demo)",
                         workflowId: null,
                     });
                 },
@@ -235,17 +235,19 @@ export const useWorkflowStore = create<WorkflowState>()(
 
                 // Persist nodes but strip ALL runtime execution state so nodes never
                 // wake up in a 'loading' state after a page refresh.
+                // Persist nodes but strip volatile runtime state.
+                // Keep outputUrl and output so previews persist across reloads.
                 partialize: (state) => ({
                     userId: state.userId,
                     nodes: state.nodes.map((node) => ({
                         ...node,
                         data: {
                             ...node.data,
-                            // Always reset execution state to idle before saving
-                            status: 'idle' as const,
-                            output: undefined,
-                            outputUrl: undefined,
-                            outputs: undefined,
+                            // If it has an outputUrl, it's successful. Otherwise idle.
+                            status: node.data.outputUrl ? 'success' as const : 'idle' as const,
+                            output: node.data.output,
+                            outputUrl: node.data.outputUrl,
+                            outputs: node.data.outputs,
                             errorMessage: undefined,
                         },
                     })),
@@ -272,13 +274,20 @@ export const useWorkflowStore = create<WorkflowState>()(
                 // so that the migrate() callback and version checks work correctly.
                 storage: {
                     getItem: (name: string) => {
-                        // Try user-specific key first (written by setItem below)
-                        // We don't know the userId here, so fall back to the generic key.
-                        const str = localStorage.getItem(name);
-                        if (!str) return null;
-                        // Return the full object — NOT just .state — so Zustand can
-                        // read the version field and run migrate() when needed.
-                        return JSON.parse(str);
+                        // We need to check both the generic key and any user-specific keys.
+                        // Since we don't know the userId yet, we check the generic one first.
+                        const genericStr = localStorage.getItem(name);
+                        if (genericStr) {
+                            const parsed = JSON.parse(genericStr);
+                            const userId = parsed.state?.userId;
+                            if (userId) {
+                                const userKey = `${name}-${userId}`;
+                                const userStr = localStorage.getItem(userKey);
+                                if (userStr) return JSON.parse(userStr);
+                            }
+                            return parsed;
+                        }
+                        return null;
                     },
                     setItem: (name: string, value: any) => {
                         // Zustand's persist wraps the state in { state: ..., version: ... }

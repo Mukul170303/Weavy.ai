@@ -46,6 +46,7 @@ export default function VideoNode({ id, data, isConnectable, selected }: NodePro
                     },
                     status: "success",
                     videoUrl: undefined,
+                    outputUrl: url, // Standardized output
                 });
             } catch (err: any) {
                 console.error("Video Upload Failed:", err);
@@ -115,7 +116,13 @@ export default function VideoNode({ id, data, isConnectable, selected }: NodePro
 
                 {videoSrc ? (
                     <div className="relative group">
-                        <video src={videoSrc} controls className="w-full h-40 object-cover rounded-lg border border-white/10 shadow-lg" />
+                        <video 
+                            key={videoSrc}
+                            src={videoSrc} 
+                            controls 
+                            className="w-full h-40 object-cover rounded-lg border border-white/10 shadow-lg" 
+                            preload="auto"
+                        />
 
                         <button
                             onClick={clearVideo}

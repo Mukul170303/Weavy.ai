@@ -41,29 +41,52 @@ export default function ExtractFrameNode({ id, data, isConnectable, selected }: 
         try {
             updateNodeData(id, { status: "loading", errorMessage: undefined });
 
-            let workflowIdInStore = useWorkflowStore.getState().workflowId;
-            if (!workflowIdInStore || isNaN(parseInt(String(workflowIdInStore)))) {
-                console.log("[Node] No valid ID found, auto-saving...");
-                const savedId = await useWorkflowStore.getState().saveWorkflow();
-                if (!savedId) {
-                    throw new Error("Failed to auto-save workflow. Please save manually.");
-                }
-                workflowIdInStore = savedId;
+            // 1. Find the connected video source
+            const videoEdge = edges.find(e => e.target === id && e.targetHandle === "video-input");
+            if (!videoEdge) {
+                throw new Error("Please connect a video source first.");
             }
 
-            const result = await runSelectedNodesAction(String(workflowIdInStore), [id]);
-
-            if (!result.success) {
-                throw new Error(result.error || "Failed to start extraction");
+            const sourceNode = getNodes().find(n => n.id === videoEdge.source);
+            if (!sourceNode) {
+                throw new Error("Source node not found.");
             }
 
-            console.log(`[ExtractFrameNode] Task triggered via orchestrator: ${result.runId}`);
+            // Standardized data flow: look for outputUrl
+            const sourceUrl = (sourceNode.data as any).outputUrl || (sourceNode.data as any).videoUrl || (sourceNode.data as any).file?.url;
+            
+            if (!sourceUrl) {
+                throw new Error("Source node has no output. Please upload a video first.");
+            }
+
+            // 2. Call the direct API
+            const response = await fetch("/api/extract-frame", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    videoUrl: sourceUrl,
+                    timestamp
+                })
+            });
+
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(result.error || "Failed to extract frame");
+            }
+
+            console.log(`[ExtractFrameNode] Success!`);
+            
+            updateNodeData(id, { 
+                status: "success", 
+                outputUrl: result.outputUrl 
+            });
 
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : "Failed to extract frame";
             updateNodeData(id, { status: "error", errorMessage });
         }
-    }, [id, updateNodeData]);
+    }, [id, updateNodeData, edges, getNodes, timestamp]);
 
     return (
         <div
@@ -109,7 +132,7 @@ export default function ExtractFrameNode({ id, data, isConnectable, selected }: 
                 </div>
             </div>
 
-            <div className="p-4 flex-1 flex flex-col space-y-4">
+            <div className="p-3 flex-1 flex flex-col space-y-3">
                 <div className="relative group">
                     {/* Timestamp Handle */}
                     <Handle
@@ -158,13 +181,13 @@ export default function ExtractFrameNode({ id, data, isConnectable, selected }: 
                 )}
 
                 {data.outputUrl && data.status !== "error" && (
-                    <div className="overflow-hidden rounded-lg border border-white/10 bg-black/50 aspect-video flex items-center justify-center">
-                        <img src={data.outputUrl} alt="Extracted" className="max-w-full max-h-full object-contain" />
+                    <div className="overflow-hidden rounded-lg border border-white/10 bg-black/50 h-40 flex items-center justify-center shadow-lg">
+                        <img src={data.outputUrl} alt="Extracted" className="w-full h-full object-cover" />
                     </div>
                 )}
             </div>
 
-            <div className="px-4 pb-4">
+            <div className="px-3 pb-3">
                 <button
                     onClick={handleRun}
                     disabled={data.status === "loading" || !isVideoConnected}
@@ -179,20 +202,22 @@ export default function ExtractFrameNode({ id, data, isConnectable, selected }: 
                 </button>
             </div>
 
+            {/* Video Input Handle (Top Left) */}
             <Handle
                 type="target"
                 position={Position.Left}
                 id="video-input"
                 isConnectable={isConnectable}
-                className="!w-2 !h-4 !rounded-sm !bg-blue-400 !border-none -left-1"
+                className="!w-3 !h-3 !bg-blue-400 !border-2 !border-[#1a1a1a] -left-1.5 top-12"
             />
 
+            {/* Frame Output Handle (Middle Right) */}
             <Handle
                 type="source"
                 position={Position.Right}
                 id="output"
                 isConnectable={isConnectable}
-                className="!w-2 !h-4 !rounded-sm !bg-purple-500 !border-none -right-1"
+                className="!w-3 !h-3 !bg-purple-500 !border-2 !border-[#1a1a1a] -right-1.5"
             />
         </div>
     );

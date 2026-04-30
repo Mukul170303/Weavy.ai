@@ -19,7 +19,7 @@ export default function HeroSection() {
       />
 
       {/* HERO TEXT CONTENT */}
-      <div className="relative z-10 pt-24 md:pt-32 px-4 md:px-12 lg:px-20">
+      <div className="relative z-10 pt-36 md:pt-44 px-4 md:px-12 lg:px-20">
         <div className="max-w-[1400px] mx-auto mb-10">
 
           <div className="flex flex-col md:flex-row md:items-start md:gap-20 lg:gap-28">

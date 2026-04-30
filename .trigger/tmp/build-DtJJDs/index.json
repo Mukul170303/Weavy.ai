@@ -1,0 +1,71 @@
+{
+  "configPath": "C:\\NeuraWeavy\\workflow-builder\\.trigger\\tmp\\build-DtJJDs\\NeuraWeavy\\workflow-builder\\trigger.config.mjs",
+  "customConditions": [
+  ],
+  "prompts": [
+  ],
+  "queues": [
+  ],
+  "runtime": "node",
+  "runtimeVersion": "24.14.0",
+  "tasks": [
+    {
+      "entryPoint": "C:\\NeuraWeavy\\workflow-builder\\.trigger\\tmp\\build-DtJJDs\\NeuraWeavy\\workflow-builder\\trigger\\orchestrator.mjs",
+      "filePath": "trigger/orchestrator.ts",
+      "id": "generate-text",
+      "maxDuration": 3600,
+      "retry": {
+        "factor": 2,
+        "maxAttempts": 3,
+        "maxTimeoutInMs": 10000,
+        "minTimeoutInMs": 1000,
+        "randomize": true
+      }
+    },
+    {
+      "entryPoint": "C:\\NeuraWeavy\\workflow-builder\\.trigger\\tmp\\build-DtJJDs\\NeuraWeavy\\workflow-builder\\trigger\\orchestrator.mjs",
+      "filePath": "trigger/orchestrator.ts",
+      "id": "crop-image",
+      "maxDuration": 3600,
+      "retry": {
+        "factor": 2,
+        "maxAttempts": 3,
+        "maxTimeoutInMs": 10000,
+        "minTimeoutInMs": 1000,
+        "randomize": true
+      }
+    },
+    {
+      "entryPoint": "C:\\NeuraWeavy\\workflow-builder\\.trigger\\tmp\\build-DtJJDs\\NeuraWeavy\\workflow-builder\\trigger\\orchestrator.mjs",
+      "filePath": "trigger/orchestrator.ts",
+      "id": "extract-frame",
+      "maxDuration": 3600,
+      "retry": {
+        "factor": 2,
+        "maxAttempts": 3,
+        "maxTimeoutInMs": 10000,
+        "minTimeoutInMs": 1000,
+        "randomize": true
+      }
+    },
+    {
+      "entryPoint": "C:\\NeuraWeavy\\workflow-builder\\.trigger\\tmp\\build-DtJJDs\\NeuraWeavy\\workflow-builder\\trigger\\orchestrator.mjs",
+      "filePath": "trigger/orchestrator.ts",
+      "id": "workflow-orchestrator",
+      "maxDuration": 3600,
+      "retry": {
+        "factor": 2,
+        "maxAttempts": 3,
+        "maxTimeoutInMs": 10000,
+        "minTimeoutInMs": 1000,
+        "randomize": true
+      }
+    }
+  ],
+  "timings": {
+    "lib/transloadit.ts": 1.5237999999999943,
+    "trigger/orchestrator.ts": 38.04879999999997,
+    "trigger/workflow-nodes.ts": 21.137400000000014
+  },
+  "workerEntryPoint": "C:\\NeuraWeavy\\workflow-builder\\.trigger\\tmp\\build-DtJJDs\\Users\\mukul\\AppData\\Local\\npm-cache\\_npx\\f51a09bd0abf5f10\\node_modules\\trigger.dev\\dist\\esm\\entryPoints\\dev-run-worker.mjs"
+}
