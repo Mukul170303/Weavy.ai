@@ -26,15 +26,15 @@ const nextConfig: NextConfig = {
     serverActions: {
       bodySizeLimit: "10mb",
     },
-    serverComponentsExternalPackages: [
-      "ffmpeg-static",
-      "ffprobe-static",
-      "@ffmpeg-installer/ffmpeg",
-      "fluent-ffmpeg",
-      "sharp",
-      "transloadit"
-    ],
   },
+  serverExternalPackages: [
+    "ffmpeg-static",
+    "ffprobe-static",
+    "@ffmpeg-installer/ffmpeg",
+    "fluent-ffmpeg",
+    "sharp",
+    "transloadit"
+  ],
 };
 
 export default nextConfig;

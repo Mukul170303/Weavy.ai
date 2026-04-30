@@ -18,7 +18,9 @@ export async function POST(req: Request) {
     // Handle relative URLs
     let finalImageUrl = imageUrl;
     if (imageUrl.startsWith("/")) {
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001";
+      const host = req.headers.get("host");
+      const protocol = host?.includes("localhost") ? "http" : "https";
+      const baseUrl = `${protocol}://${host}`;
       finalImageUrl = `${baseUrl}${imageUrl}`;
       console.log(`[API] Resolved relative Image URL: ${finalImageUrl}`);
     }

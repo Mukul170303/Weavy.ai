@@ -2,6 +2,7 @@
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { auth } from "@clerk/nextjs/server";
+import { headers } from "next/headers";
 
 // Initialize Gemini
 if (!process.env.GEMINI_API_KEY) {
@@ -60,7 +61,10 @@ export async function executeLLMAction({
           try {
             let finalUrl = url;
             if (url.startsWith("/")) {
-              const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001";
+              const headersList = await headers();
+              const host = headersList.get("host");
+              const protocol = host?.includes("localhost") ? "http" : "https";
+              const baseUrl = `${protocol}://${host}`;
               finalUrl = `${baseUrl}${url}`;
             }
 
